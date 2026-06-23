@@ -1,0 +1,15 @@
+services:
+  app:
+    build:
+      context: .
+      args:
+        VITE_API_BASE: /api
+    image: ms-mail-admin:latest
+    container_name: ms-mail-admin
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/backend/data
+    restart: unless-stopped
