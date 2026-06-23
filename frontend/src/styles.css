@@ -281,6 +281,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
 }
 
 .card-title > div {
@@ -298,6 +299,11 @@ body {
   flex-direction: column;
   gap: 4px;
   min-width: 220px;
+}
+
+.mail-search {
+  width: 320px;
+  flex: 0 0 auto;
 }
 
 .message-list {
@@ -547,6 +553,15 @@ body {
 
   .table-card {
     overflow-x: auto;
+  }
+
+  .card-title {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .mail-search {
+    width: 100%;
   }
 
   .message-head {

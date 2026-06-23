@@ -10,6 +10,7 @@ import {
   Modal,
   Nav,
   Popconfirm,
+  Input,
   SideSheet,
   Space,
   Spin,
@@ -27,6 +28,7 @@ import {
   IconInbox,
   IconMail,
   IconPlus,
+  IconSearch,
   IconRefresh,
   IconUpload,
 } from "@douyinfe/semi-icons";
@@ -260,6 +262,7 @@ function AppShell({ username, onLogout }) {
   const navigate = useNavigate();
   const activeAdminPage = location.pathname.includes("/api-keys") ? "api-keys" : "mailboxes";
   const [mailboxes, setMailboxes] = useState([]);
+  const [mailboxSearch, setMailboxSearch] = useState("");
   const [apiKeys, setApiKeys] = useState([]);
   const [loading, setLoading] = useState(true);
   const [apiKeyLoading, setApiKeyLoading] = useState(false);
@@ -443,6 +446,17 @@ function AppShell({ username, onLogout }) {
       { label: "令牌账号", value: withToken, hint: "OAuth 凭据", tone: "amber" },
     ];
   }, [mailboxes]);
+
+  const filteredMailboxes = useMemo(() => {
+    const keyword = mailboxSearch.trim().toLowerCase();
+    if (!keyword) return mailboxes;
+    return mailboxes.filter((item) => {
+      const email = String(item.email || "").toLowerCase();
+      const remark = String(item.remark || "").toLowerCase();
+      const token = String(item.public_token || "").toLowerCase();
+      return email.includes(keyword) || remark.includes(keyword) || token.includes(keyword);
+    });
+  }, [mailboxes, mailboxSearch]);
 
   const columns = useMemo(
     () => [
@@ -674,8 +688,20 @@ function AppShell({ username, onLogout }) {
                   <div className="card-title">
                     <div>
                       <Text strong>邮箱列表</Text>
-                      <Text type="tertiary">支持密码或 Microsoft OAuth IMAP 凭据</Text>
+                      <Text type="tertiary">
+                        支持密码或 Microsoft OAuth IMAP 凭据 · 共 {mailboxes.length} 个，当前显示{" "}
+                        {filteredMailboxes.length} 个
+                      </Text>
                     </div>
+                    <Input
+                      className="mail-search"
+                      value={mailboxSearch}
+                      onChange={setMailboxSearch}
+                      showClear
+                      prefix={<IconSearch />}
+                      placeholder="搜索邮箱、备注或 Token"
+                      aria-label="搜索邮箱"
+                    />
                   </div>
                 }
                 bodyStyle={{ padding: 0 }}
@@ -683,14 +709,19 @@ function AppShell({ username, onLogout }) {
                 <Table
                   rowKey="id"
                   columns={columns}
-                  dataSource={mailboxes}
+                  dataSource={filteredMailboxes}
                   loading={loading}
                   rowSelection={{
                     selectedRowKeys,
                     onChange: (keys) => setSelectedRowKeys(keys),
                   }}
                   pagination={{ pageSize: 10 }}
-                  empty={<Empty title="暂无邮箱" description="请先导入 Microsoft 邮箱凭据" />}
+                  empty={
+                    <Empty
+                      title={mailboxSearch.trim() ? "未找到匹配邮箱" : "暂无邮箱"}
+                      description={mailboxSearch.trim() ? "试试邮箱地址、备注或 Token" : "请先导入 Microsoft 邮箱凭据"}
+                    />
+                  }
                 />
               </Card>
             </>
