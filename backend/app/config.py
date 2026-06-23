@@ -16,7 +16,12 @@ class Settings(BaseSettings):
     admin_username: str = "admin"
     admin_password: str = "admin123"
     public_api_key: str = "change-me-public-api-key"
-    cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
+    cors_origins: list[str] = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:5175",
+        "http://127.0.0.1:5175",
+    ]
     frontend_dist_dir: str = str(BASE_DIR.parent / "frontend" / "dist")
 
     imap_host: str = "outlook.office365.com"

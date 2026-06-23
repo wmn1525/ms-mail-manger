@@ -284,6 +284,18 @@ body {
   gap: 16px;
 }
 
+.mailbox-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mailbox-toolbar__text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .card-title > div {
   display: flex;
   flex-direction: column;
@@ -558,6 +570,10 @@ body {
   .card-title {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .mailbox-toolbar {
+    width: 100%;
   }
 
   .mail-search {

@@ -685,8 +685,8 @@ function AppShell({ username, onLogout }) {
               <Card
                 className="table-card"
                 title={
-                  <div className="card-title">
-                    <div>
+                  <div className="mailbox-toolbar">
+                    <div className="mailbox-toolbar__text">
                       <Text strong>邮箱列表</Text>
                       <Text type="tertiary">
                         支持密码或 Microsoft OAuth IMAP 凭据 · 共 {mailboxes.length} 个，当前显示{" "}
