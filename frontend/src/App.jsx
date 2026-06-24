@@ -162,6 +162,17 @@ GET /api/public/mailboxes
 GET /api/public/mailboxes/{tk_xxxx}
 \`\`\`
 
+## 按邮箱查询
+
+\`\`\`http
+GET /api/public/mailboxes/by-email?email=user%40outlook.com
+GET /api/public/mailboxes/by-email/messages?email=user%40outlook.com&limit=30
+GET /api/public/mailboxes/by-email/messages/{uid}?email=user%40outlook.com
+GET /api/public/mailboxes/by-email/code?email=user%40outlook.com&limit=10
+\`\`\`
+
+支持自动识别分裂别名，例如 \`user+abcd@outlook.com\` 会回源查询 \`user@outlook.com\`。
+
 ## 邮件列表
 
 \`\`\`http
