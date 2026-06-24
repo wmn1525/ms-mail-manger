@@ -51,6 +51,16 @@ class MailboxOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class MailboxListOut(BaseModel):
+    items: list[MailboxOut]
+    total: int
+    page: int
+    page_size: int
+    live: int
+    dead: int
+    with_token: int
+
+
 class ImportIn(BaseModel):
     content: str = Field(..., description="每行：邮箱----密码----client_id----令牌")
 

@@ -296,6 +296,12 @@ body {
   gap: 4px;
 }
 
+.mailbox-toolbar__controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .card-title > div {
   display: flex;
   flex-direction: column;
@@ -316,6 +322,20 @@ body {
 .mail-search {
   width: 320px;
   flex: 0 0 auto;
+}
+
+.mailbox-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border-top: 1px solid var(--semi-color-border);
+}
+
+.mailbox-pagination__controls {
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .message-list {
@@ -367,6 +387,19 @@ body {
   width: 100%;
   justify-content: flex-end;
   margin-top: 8px;
+}
+
+.split-export-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.split-export-field {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
 }
 
 .detail-panel {
@@ -576,8 +609,26 @@ body {
     width: 100%;
   }
 
+  .mailbox-toolbar__controls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
   .mail-search {
     width: 100%;
+  }
+
+  .mailbox-pagination {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .mailbox-pagination__controls {
+    justify-content: flex-start;
+  }
+
+  .split-export-field {
+    grid-template-columns: 1fr;
   }
 
   .message-head {

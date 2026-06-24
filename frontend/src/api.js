@@ -44,7 +44,8 @@ export const api = {
   createApiKey: (name) => request("/api-keys", { method: "POST", body: JSON.stringify({ name }) }),
   updateApiKey: (id, enabled) => request(`/api-keys/${id}`, { method: "PATCH", body: JSON.stringify({ enabled }) }),
   deleteApiKey: (id) => request(`/api-keys/${id}`, { method: "DELETE" }),
-  mailboxes: () => request("/mailboxes"),
+  mailboxes: (page = 1, pageSize = 20) =>
+    request(`/mailboxes?page=${encodeURIComponent(page)}&page_size=${encodeURIComponent(pageSize)}`),
   createMailbox: (payload) => request("/mailboxes", { method: "POST", body: JSON.stringify(payload) }),
   importMailboxes: (content) =>
     request("/mailboxes/import", { method: "POST", body: JSON.stringify({ content }) }),

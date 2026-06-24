@@ -31,11 +31,47 @@ import {
   IconSearch,
   IconRefresh,
   IconUpload,
+  IconDownload,
 } from "@douyinfe/semi-icons";
 import { api, clearSession, getToken, setSession } from "./api";
+import { MailboxPagination } from "./components/MailboxPagination";
+import { DEFAULT_MAILBOX_PAGE_SIZE } from "./constants/mailbox";
 
 const { Header, Sider, Content } = Layout;
 const { Text } = Typography;
+const SPLIT_ALIAS_LENGTH = 4;
+
+function randomLetters(length = SPLIT_ALIAS_LENGTH) {
+  const alphabet = "abcdefghijklmnopqrstuvwxyz";
+  let value = "";
+  for (let index = 0; index < length; index += 1) {
+    value += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  return value;
+}
+
+function buildSplitEmail(email, suffix) {
+  const atIndex = email.lastIndexOf("@");
+  if (atIndex <= 0) return email;
+  return `${email.slice(0, atIndex)}+${suffix}${email.slice(atIndex)}`;
+}
+
+function escapeCsvCell(value) {
+  return `"${String(value ?? "").replaceAll('"', '""')}"`;
+}
+
+function downloadCsv(filename, rows) {
+  const csv = `\uFEFF${rows.map((row) => row.map(escapeCsvCell).join(",")).join("\r\n")}`;
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
 
 function Login({ onLogin }) {
   const [loading, setLoading] = useState(false);
@@ -281,11 +317,24 @@ function AppShell({ username, onLogout }) {
   const [selectedRowKeys, setSelectedRowKeys] = useState([]);
   const [bulkChecking, setBulkChecking] = useState(false);
   const [removingAbnormal, setRemovingAbnormal] = useState(false);
+  const [mailboxPage, setMailboxPage] = useState(1);
+  const [mailboxPageSize, setMailboxPageSize] = useState(DEFAULT_MAILBOX_PAGE_SIZE);
+  const [mailboxTotal, setMailboxTotal] = useState(0);
+  const [mailboxStats, setMailboxStats] = useState({ live: 0, dead: 0, withToken: 0 });
+  const [splitExportVisible, setSplitExportVisible] = useState(false);
+  const [splitCount, setSplitCount] = useState("10");
 
   async function loadMailboxes() {
     setLoading(true);
     try {
-      setMailboxes(await api.mailboxes());
+      const data = await api.mailboxes(mailboxPage, mailboxPageSize);
+      setMailboxes(data.items);
+      setMailboxTotal(data.total);
+      setMailboxStats({
+        live: data.live,
+        dead: data.dead,
+        withToken: data.with_token,
+      });
     } catch (error) {
       Toast.error(error.message);
     } finally {
@@ -306,6 +355,9 @@ function AppShell({ username, onLogout }) {
 
   useEffect(() => {
     loadMailboxes();
+  }, [mailboxPage, mailboxPageSize]);
+
+  useEffect(() => {
     loadApiKeys();
   }, []);
 
@@ -315,6 +367,15 @@ function AppShell({ username, onLogout }) {
       return;
     }
     loadMailboxes();
+  }
+
+  function handleMailboxPageSizeChange(value) {
+    setMailboxPage(1);
+    setMailboxPageSize(Number(value));
+  }
+
+  function handleMailboxPageChange(page) {
+    setMailboxPage(page);
   }
 
   async function handleCreateApiKey() {
@@ -398,6 +459,45 @@ function AppShell({ username, onLogout }) {
     }
   }
 
+  function openSplitExport() {
+    if (!selectedRowKeys.length) {
+      Toast.warning("请先选择要导出的邮箱");
+      return;
+    }
+    setSplitExportVisible(true);
+  }
+
+  function handleSplitExport() {
+    const count = Number.parseInt(splitCount, 10);
+    if (!Number.isInteger(count) || count < 1 || count > 10000) {
+      Toast.warning("分裂次数请输入 1-10000 之间的整数");
+      return;
+    }
+
+    const selectedKeys = new Set(selectedRowKeys.map(String));
+    const selectedMailboxes = mailboxes.filter((item) => selectedKeys.has(String(item.id)));
+    if (!selectedMailboxes.length) {
+      Toast.warning("未找到已选择的邮箱");
+      return;
+    }
+
+    const rows = [["email"]];
+    selectedMailboxes.forEach((mailbox) => {
+      rows.push([mailbox.email]);
+      const usedAliases = new Set();
+      while (usedAliases.size < count) {
+        const alias = randomLetters();
+        if (usedAliases.has(alias)) continue;
+        usedAliases.add(alias);
+        rows.push([buildSplitEmail(mailbox.email, alias)]);
+      }
+    });
+
+    downloadCsv(`mailbox-split-${new Date().toISOString().slice(0, 10)}.csv`, rows);
+    Toast.success(`已导出 ${rows.length - 1} 条邮箱`);
+    setSplitExportVisible(false);
+  }
+
   async function openMessages(record) {
     setActiveMailbox(record);
     setMessageVisible(true);
@@ -436,16 +536,13 @@ function AppShell({ username, onLogout }) {
   }
 
   const stats = useMemo(() => {
-    const live = mailboxes.filter((item) => item.status === "live").length;
-    const dead = mailboxes.filter((item) => item.status === "dead").length;
-    const withToken = mailboxes.filter((item) => item.has_token).length;
     return [
-      { label: "邮箱总数", value: mailboxes.length, hint: "已导入账号", tone: "blue" },
-      { label: "可用邮箱", value: live, hint: "最近测活正常", tone: "green" },
-      { label: "异常邮箱", value: dead, hint: "需要更新凭据", tone: "red" },
-      { label: "令牌账号", value: withToken, hint: "OAuth 凭据", tone: "amber" },
+      { label: "邮箱总数", value: mailboxTotal, hint: "已导入账号", tone: "blue" },
+      { label: "可用邮箱", value: mailboxStats.live, hint: "最近测活正常", tone: "green" },
+      { label: "异常邮箱", value: mailboxStats.dead, hint: "需要更新凭据", tone: "red" },
+      { label: "令牌账号", value: mailboxStats.withToken, hint: "OAuth 凭据", tone: "amber" },
     ];
-  }, [mailboxes]);
+  }, [mailboxStats, mailboxTotal]);
 
   const filteredMailboxes = useMemo(() => {
     const keyword = mailboxSearch.trim().toLowerCase();
@@ -654,6 +751,9 @@ function AppShell({ username, onLogout }) {
                   <Button icon={<IconRefresh />} loading={bulkChecking} onClick={handleBulkCheck}>
                     批量测活
                   </Button>
+                  <Button icon={<IconDownload />} onClick={openSplitExport}>
+                    分裂导出 CSV
+                  </Button>
                   <Popconfirm
                     title="移除异常邮箱"
                     content="将删除所有状态为异常的邮箱。"
@@ -689,19 +789,21 @@ function AppShell({ username, onLogout }) {
                     <div className="mailbox-toolbar__text">
                       <Text strong>邮箱列表</Text>
                       <Text type="tertiary">
-                        支持密码或 Microsoft OAuth IMAP 凭据 · 共 {mailboxes.length} 个，当前显示{" "}
+                        支持密码或 Microsoft OAuth IMAP 凭据 · 共 {mailboxTotal} 个，当前显示{" "}
                         {filteredMailboxes.length} 个
                       </Text>
                     </div>
-                    <Input
-                      className="mail-search"
-                      value={mailboxSearch}
-                      onChange={setMailboxSearch}
-                      showClear
-                      prefix={<IconSearch />}
-                      placeholder="搜索邮箱、备注或 Token"
-                      aria-label="搜索邮箱"
-                    />
+                    <div className="mailbox-toolbar__controls">
+                      <Input
+                        className="mail-search"
+                        value={mailboxSearch}
+                        onChange={setMailboxSearch}
+                        showClear
+                        prefix={<IconSearch />}
+                        placeholder="搜索邮箱、备注或 Token"
+                        aria-label="搜索邮箱"
+                      />
+                    </div>
                   </div>
                 }
                 bodyStyle={{ padding: 0 }}
@@ -715,13 +817,21 @@ function AppShell({ username, onLogout }) {
                     selectedRowKeys,
                     onChange: (keys) => setSelectedRowKeys(keys),
                   }}
-                  pagination={{ pageSize: 10 }}
+                  pagination={false}
                   empty={
                     <Empty
                       title={mailboxSearch.trim() ? "未找到匹配邮箱" : "暂无邮箱"}
                       description={mailboxSearch.trim() ? "试试邮箱地址、备注或 Token" : "请先导入 Microsoft 邮箱凭据"}
                     />
                   }
+                />
+                <MailboxPagination
+                  currentPage={mailboxPage}
+                  pageSize={mailboxPageSize}
+                  total={mailboxTotal}
+                  currentCount={filteredMailboxes.length}
+                  onPageChange={handleMailboxPageChange}
+                  onPageSizeChange={handleMailboxPageSizeChange}
                 />
               </Card>
             </>
@@ -804,6 +914,31 @@ function AppShell({ username, onLogout }) {
           loadMailboxes();
         }}
       />
+      <Modal
+        title="分裂导出 CSV"
+        visible={splitExportVisible}
+        onCancel={() => setSplitExportVisible(false)}
+        onOk={handleSplitExport}
+        okText="导出"
+      >
+        <div className="split-export-panel">
+          <Text type="secondary">
+            已选择 {selectedRowKeys.length} 个邮箱，每个邮箱会导出本体和指定次数的 +4 位随机字母别名。
+          </Text>
+          <div className="split-export-field">
+            <Text strong>分裂次数</Text>
+            <Input
+              type="number"
+              min={1}
+              max={10000}
+              value={splitCount}
+              onChange={setSplitCount}
+              placeholder="请输入分裂次数"
+              aria-label="分裂次数"
+            />
+          </div>
+        </div>
+      </Modal>
       <SideSheet
         title={activeMailbox ? `${activeMailbox.email} 的邮件` : "邮件列表"}
         visible={messageVisible}

@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..db import get_db
@@ -14,6 +14,7 @@ from ..schemas import (
     ImportIn,
     ImportOut,
     MailboxCreate,
+    MailboxListOut,
     MailboxOut,
     MessageDetailOut,
     MessageListOut,
@@ -102,10 +103,27 @@ def check_mailbox_model(mailbox: Mailbox) -> CheckOut:
     return CheckOut(id=mailbox.id, status=status_value, error=error, checked_at=checked_at)
 
 
-@router.get("", response_model=list[MailboxOut])
-def list_mailboxes(db: Session = Depends(get_db)) -> list[MailboxOut]:
-    mailboxes = db.scalars(select(Mailbox).order_by(Mailbox.id.desc())).all()
-    return [mailbox_out(mailbox) for mailbox in mailboxes]
+@router.get("", response_model=MailboxListOut)
+def list_mailboxes(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+) -> MailboxListOut:
+    offset = (page - 1) * page_size
+    mailboxes = db.scalars(select(Mailbox).order_by(Mailbox.id.desc()).offset(offset).limit(page_size)).all()
+    total = db.scalar(select(func.count()).select_from(Mailbox)) or 0
+    live = db.scalar(select(func.count()).select_from(Mailbox).where(Mailbox.status == "live")) or 0
+    dead = db.scalar(select(func.count()).select_from(Mailbox).where(Mailbox.status == "dead")) or 0
+    with_token = db.scalar(select(func.count()).select_from(Mailbox).where(Mailbox.token_enc.is_not(None))) or 0
+    return MailboxListOut(
+        items=[mailbox_out(mailbox) for mailbox in mailboxes],
+        total=total,
+        page=page,
+        page_size=page_size,
+        live=live,
+        dead=dead,
+        with_token=with_token,
+    )
 
 
 @router.post("", response_model=MailboxOut)
