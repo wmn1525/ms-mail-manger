@@ -168,10 +168,41 @@ GET /api/public/mailboxes/{tk_xxxx}
 GET /api/public/mailboxes/by-email?email=user%40outlook.com
 GET /api/public/mailboxes/by-email/messages?email=user%40outlook.com&limit=30
 GET /api/public/mailboxes/by-email/messages/{uid}?email=user%40outlook.com
-GET /api/public/mailboxes/by-email/code?email=user%40outlook.com&limit=10
 \`\`\`
 
 支持自动识别分裂别名，例如 \`user+abcd@outlook.com\` 会回源查询 \`user@outlook.com\`。
+
+## 按邮箱获取最新验证码
+
+\`\`\`http
+GET /api/public/mailboxes/by-email/code?email=user%40outlook.com&limit=10
+X-API-Key: your_api_key
+\`\`\`
+
+也可以把 API Key 放在 query 中：
+
+\`\`\`http
+GET /api/public/mailboxes/by-email/code?email=user%40outlook.com&limit=10&api_key=your_api_key
+\`\`\`
+
+\`email\` 为必填邮箱地址，\`limit\` 表示从最近多少封邮件中查找验证码，范围 1-30，默认 10。
+接口会返回该邮箱最近邮件中识别到的 4-8 位数字验证码。返回字段包含 \`mailbox_token\`、\`email\`、\`code\`、\`message\`。
+
+\`\`\`json
+{
+  "mailbox_token": "tk_xxxx",
+  "email": "user@outlook.com",
+  "code": "123456",
+  "message": {
+    "uid": "100",
+    "subject": "Your verification code",
+    "from": "service@example.com",
+    "date": "2026-06-30T12:00:00Z",
+    "snippet": "Your verification code is 123456",
+    "code": "123456"
+  }
+}
+\`\`\`
 
 ## 邮件列表
 
