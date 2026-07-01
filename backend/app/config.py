@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     imap_host: str = "outlook.office365.com"
     imap_port: int = 993
     imap_folder: str = "INBOX"
-    microsoft_scope: str = "https://outlook.office.com/IMAP.AccessAsUser.All offline_access openid email"
+    microsoft_scope: str = "https://outlook.office.com/IMAP.AccessAsUser.All offline_access"
 
     model_config = SettingsConfigDict(env_file=str(BASE_DIR.parent / ".env"), env_file_encoding="utf-8", extra="ignore")
 

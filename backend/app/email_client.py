@@ -9,10 +9,9 @@ import html
 import imaplib
 import re
 import ssl
-import urllib.parse
-import urllib.request
 
 from .config import get_settings
+from .mail_oauth import GRAPH_MODES, IMAP_MODE, refresh_access_token_for_scope
 
 
 CODE_RE = re.compile(r"(?<!\d)(\d{4,8})(?!\d)")
@@ -122,35 +121,45 @@ def format_message(uid: bytes | str, message: Message, include_body: bool = Fals
 
 def refresh_access_token(client_id: str, refresh_token: str) -> str:
     settings = get_settings()
-    form = urllib.parse.urlencode(
-        {
-            "client_id": client_id,
-            "grant_type": "refresh_token",
-            "refresh_token": refresh_token,
-            "scope": settings.microsoft_scope,
-        }
-    ).encode("utf-8")
-    request = urllib.request.Request(
-        "https://login.microsoftonline.com/common/oauth2/v2.0/token",
-        data=form,
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-        method="POST",
-    )
-    with urllib.request.urlopen(request, timeout=20) as response:
-        data = response.read().decode("utf-8")
-    import json
-
-    payload = json.loads(data)
-    access_token = payload.get("access_token")
-    if not access_token:
-        raise RuntimeError("刷新 Microsoft access token 失败")
-    return access_token
+    return refresh_access_token_for_scope(client_id, refresh_token, settings.microsoft_scope)
 
 
 class OutlookImapClient:
     def __init__(self, credential: MailCredential):
         self.credential = credential
         self.settings = get_settings()
+
+    def _has_refresh_token(self) -> bool:
+        return bool(self.credential.client_id and self.credential.token and not self.credential.token.startswith("eyJ"))
+
+    def _graph_client(self):
+        # Graph 模式需要先用最小读信请求确认 token 不只是能换取，还能真正读邮箱。
+        from .email_graph import GraphMailClient
+
+        errors: list[str] = []
+        if not self.credential.client_id or not self.credential.token:
+            raise RuntimeError("缺少 Microsoft OAuth 凭据")
+        for mode in GRAPH_MODES:
+            try:
+                token = refresh_access_token_for_scope(self.credential.client_id, self.credential.token, mode.scope)
+                client = GraphMailClient(token)
+                client.check_alive()
+                return client
+            except Exception as exc:
+                errors.append(f"{mode.name}: {exc}")
+        raise RuntimeError("Graph 模式不可用：" + "；".join(errors))
+
+    def _run_auto(self, graph_call, imap_call):
+        # OAuth refresh token 按新GR、老GR、IMAP 的顺序判断；密码账号仍直接走 IMAP。
+        if not self._has_refresh_token():
+            return imap_call()
+        try:
+            return graph_call(self._graph_client())
+        except Exception as graph_exc:
+            try:
+                return imap_call()
+            except Exception as imap_exc:
+                raise RuntimeError(f"三种模式均不可用：{graph_exc}；imap: {imap_exc}") from imap_exc
 
     def _open(self) -> imaplib.IMAP4_SSL:
         context = ssl.create_default_context()
@@ -159,7 +168,7 @@ class OutlookImapClient:
             if self.credential.token:
                 token = self.credential.token
                 if self.credential.client_id and not token.startswith("eyJ"):
-                    token = refresh_access_token(self.credential.client_id, token)
+                    token = refresh_access_token_for_scope(self.credential.client_id, token, IMAP_MODE.scope)
                 auth = f"user={self.credential.email}\x01auth=Bearer {token}\x01\x01"
                 imap.authenticate("XOAUTH2", lambda _: auth.encode("utf-8"))
             elif self.credential.password:
@@ -175,6 +184,15 @@ class OutlookImapClient:
             raise
 
     def check_alive(self) -> None:
+        def check_graph(client):
+            client.check_alive()
+
+        def check_imap():
+            self._check_alive_imap()
+
+        self._run_auto(check_graph, check_imap)
+
+    def _check_alive_imap(self) -> None:
         imap = self._open()
         try:
             status, _ = imap.select(self.settings.imap_folder, readonly=True)
@@ -184,6 +202,9 @@ class OutlookImapClient:
             imap.logout()
 
     def list_messages(self, limit: int = 30) -> list[dict]:
+        return self._run_auto(lambda client: client.list_messages(limit), lambda: self._list_messages_imap(limit))
+
+    def _list_messages_imap(self, limit: int = 30) -> list[dict]:
         imap = self._open()
         try:
             status, _ = imap.select(self.settings.imap_folder, readonly=True)
@@ -211,6 +232,11 @@ class OutlookImapClient:
             imap.logout()
 
     def get_message(self, uid: str) -> dict:
+        if self._has_refresh_token() and uid.startswith("graph:"):
+            return self._graph_client().get_message(uid)
+        return self._run_auto(lambda client: client.get_message(uid), lambda: self._get_message_imap(uid))
+
+    def _get_message_imap(self, uid: str) -> dict:
         imap = self._open()
         try:
             status, _ = imap.select(self.settings.imap_folder, readonly=True)
@@ -229,6 +255,9 @@ class OutlookImapClient:
             imap.logout()
 
     def find_latest_code(self, limit: int = 10) -> dict | None:
+        return self._run_auto(lambda client: client.find_latest_code(limit), lambda: self._find_latest_code_imap(limit))
+
+    def _find_latest_code_imap(self, limit: int = 10) -> dict | None:
         imap = self._open()
         try:
             status, _ = imap.select(self.settings.imap_folder, readonly=True)
