@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import get_settings
 from .db import init_db
-from .routers import api_keys, auth, mailboxes, public
+from .routers import api_keys, auth, icloud_mailboxes, imap_configs, mailboxes, public
 
 
 settings = get_settings()
@@ -35,6 +35,8 @@ def health() -> dict:
 app.include_router(auth.router, prefix=settings.api_prefix)
 app.include_router(api_keys.router, prefix=settings.api_prefix)
 app.include_router(mailboxes.router, prefix=settings.api_prefix)
+app.include_router(imap_configs.router, prefix=settings.api_prefix)
+app.include_router(icloud_mailboxes.router, prefix=settings.api_prefix)
 app.include_router(public.router, prefix=settings.api_prefix)
 app.include_router(public.token_router, prefix=settings.api_prefix)
 

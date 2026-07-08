@@ -55,6 +55,20 @@ export const api = {
   bulkCheckMailboxes: (ids) => request("/mailboxes/bulk-check", { method: "POST", body: JSON.stringify({ ids }) }),
   messages: (id, limit = 30) => request(`/mailboxes/${id}/messages?limit=${limit}`),
   messageDetail: (id, uid) => request(`/mailboxes/${id}/messages/${encodeURIComponent(uid)}`),
+  imapConfigs: () => request("/imap-configs"),
+  createImapConfig: (payload) => request("/imap-configs", { method: "POST", body: JSON.stringify(payload) }),
+  updateImapConfig: (id, payload) =>
+    request(`/imap-configs/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  checkImapConfig: (id) => request(`/imap-configs/${id}/check`, { method: "POST" }),
+  deleteImapConfig: (id) => request(`/imap-configs/${id}`, { method: "DELETE" }),
+  icloudMailboxes: (page = 1, pageSize = 20) =>
+    request(`/icloud-mailboxes?page=${encodeURIComponent(page)}&page_size=${encodeURIComponent(pageSize)}`),
+  createIcloudMailbox: (payload) => request("/icloud-mailboxes", { method: "POST", body: JSON.stringify(payload) }),
+  importIcloudMailboxes: (payload) =>
+    request("/icloud-mailboxes/import", { method: "POST", body: JSON.stringify(payload) }),
+  deleteIcloudMailbox: (id) => request(`/icloud-mailboxes/${id}`, { method: "DELETE" }),
+  icloudMessages: (id, limit = 30) => request(`/icloud-mailboxes/${id}/messages?limit=${limit}`),
+  icloudMessageDetail: (id, uid) => request(`/icloud-mailboxes/${id}/messages/${encodeURIComponent(uid)}`),
   publicMailboxes: (apiKey) => request(`/public/mailboxes?api_key=${encodeURIComponent(apiKey)}`),
   publicMailbox: (token, apiKey) =>
     request(`/public/mailboxes/${encodeURIComponent(token)}?api_key=${encodeURIComponent(apiKey)}`),

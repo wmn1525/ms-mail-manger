@@ -344,6 +344,12 @@ body {
   gap: 12px;
 }
 
+.message-sheet-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
 .message-card {
   border-radius: 8px;
 }
