@@ -119,11 +119,6 @@ def get_icloud_client(mailbox: IcloudMailbox, db: Session) -> GenericImapClient:
     return GenericImapClient(imap_credential_from_config(config))
 
 
-def should_include_split_aliases(email: str) -> bool:
-    local, separator, _ = email.strip().lower().rpartition("@")
-    return not (separator and "+" in local)
-
-
 @router.get("/mailboxes", response_model=list[PublicMailboxOut])
 def list_public_mailboxes(db: Session = Depends(get_db)) -> list[PublicMailboxOut]:
     mailboxes = db.scalars(select(Mailbox).order_by(Mailbox.id.desc())).all()
@@ -159,7 +154,7 @@ def list_public_messages_by_email(
             messages = get_icloud_client(icloud_mailbox, db).list_messages(
                 limit=limit,
                 recipient_email=str(email),
-                include_aliases=should_include_split_aliases(str(email)),
+                include_aliases=True,
             )
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"获取邮件失败：{exc}") from exc
@@ -209,7 +204,7 @@ def get_public_latest_code_by_email(
             message = get_icloud_client(icloud_mailbox, db).find_latest_code(
                 limit=limit,
                 recipient_email=str(email),
-                include_aliases=should_include_split_aliases(str(email)),
+                include_aliases=True,
             )
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"获取验证码失败：{exc}") from exc

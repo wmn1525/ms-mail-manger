@@ -16,11 +16,25 @@ RECIPIENT_HEADERS = [
     "Cc",
     "Bcc",
     "Delivered-To",
+    "X-Delivered-To",
     "X-Original-To",
+    "Original-Recipient",
+    "X-Original-Recipient",
     "Envelope-To",
+    "X-Envelope-To",
     "Apparently-To",
     "Resent-To",
+    "X-Forwarded-To",
+    "X-Rcpt-To",
+    "X-Real-To",
 ]
+HEADER_FETCH_FIELDS = (
+    "(BODY.PEEK[HEADER.FIELDS "
+    "(FROM SUBJECT DATE TO CC BCC DELIVERED-TO X-DELIVERED-TO X-ORIGINAL-TO ORIGINAL-RECIPIENT "
+    "X-ORIGINAL-RECIPIENT ENVELOPE-TO X-ENVELOPE-TO APPARENTLY-TO RESENT-TO X-FORWARDED-TO X-RCPT-TO X-REAL-TO)])"
+)
+HEADER_SCAN_PAGE_SIZE = 20
+HEADER_SCAN_MAX_UIDS = 200
 
 
 @dataclass
@@ -75,10 +89,31 @@ class GenericImapClient:
         recipients = self._message_recipients(message)
         if target in recipients:
             return True
-        if not include_aliases or self._has_split_alias(target):
+        if not include_aliases:
             return False
         target_base = self._remove_split_alias(target)
         return any(self._remove_split_alias(address) == target_base for address in recipients)
+
+    def _first_payload(self, fetched: list[bytes | tuple[bytes, bytes]]) -> bytes | None:
+        """IMAP FETCH 会混入结束标记，这里只取真正的邮件字节。"""
+
+        return next((item[1] for item in fetched if isinstance(item, tuple) and item[1]), None)
+
+    def _fetch_message(self, imap: imaplib.IMAP4, uid: bytes | str, body: str) -> Message | None:
+        """按需读取邮件头或完整邮件，避免验证码接口无谓下载正文。"""
+
+        status, fetched = imap.uid("fetch", uid, body)
+        if status != "OK" or not fetched:
+            return None
+        raw = self._first_payload(fetched)
+        return message_from_bytes(raw) if raw else None
+
+    def _recent_uid_pages(self, value: bytes, max_count: int) -> list[list[bytes]]:
+        """从最新 UID 开始分页，限制共享接码箱的单次扫描范围。"""
+
+        uids = value.split()[-max_count:]
+        uids.reverse()
+        return [uids[index : index + HEADER_SCAN_PAGE_SIZE] for index in range(0, len(uids), HEADER_SCAN_PAGE_SIZE)]
 
     def _select_folder(self, imap: imaplib.IMAP4, folder: str) -> None:
         errors: list[str] = []
@@ -183,25 +218,22 @@ class GenericImapClient:
                 status, data = imap.uid("search", None, "ALL")
                 if status != "OK" or not data or not data[0]:
                     continue
-                uids = data[0].split()[-limit:]
-                uids.reverse()
-                for uid in uids:
-                    status, fetched = imap.uid(
-                        "fetch",
-                        uid,
-                        "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE TO CC BCC DELIVERED-TO X-ORIGINAL-TO ENVELOPE-TO APPARENTLY-TO RESENT-TO)])",
-                    )
-                    if status != "OK" or not fetched:
-                        continue
-                    raw = next((item[1] for item in fetched if isinstance(item, tuple) and item[1]), None)
-                    if not raw:
-                        continue
-                    parsed_message = message_from_bytes(raw)
-                    if not self._matches_recipient(parsed_message, recipient_email, include_aliases):
-                        continue
-                    message = format_message(uid, parsed_message, include_body=False)
-                    message["uid"] = self._scoped_uid(folder, uid)
-                    messages.append(message)
+                for uid_page in self._recent_uid_pages(data[0], max(limit, HEADER_SCAN_MAX_UIDS)):
+                    for uid in uid_page:
+                        parsed_message = self._fetch_message(imap, uid, HEADER_FETCH_FIELDS)
+                        if not parsed_message:
+                            continue
+                        if not self._matches_recipient(parsed_message, recipient_email, include_aliases):
+                            continue
+                        message = format_message(uid, parsed_message, include_body=False)
+                        message["uid"] = self._scoped_uid(folder, uid)
+                        messages.append(message)
+                        if len(messages) >= limit:
+                            break
+                    if len(messages) >= limit:
+                        break
+                if len(messages) >= limit:
+                    break
             if not messages and errors:
                 raise RuntimeError("无法打开收件箱：" + "；".join(errors))
             return messages
@@ -222,7 +254,7 @@ class GenericImapClient:
                     status, fetched = imap.uid("fetch", raw_uid, "(RFC822)")
                     if status != "OK" or not fetched:
                         raise RuntimeError("邮件不存在或无法读取")
-                    raw = next((item[1] for item in fetched if isinstance(item, tuple) and item[1]), None)
+                    raw = self._first_payload(fetched)
                     if not raw:
                         raise RuntimeError("邮件内容为空")
                     message = format_message(raw_uid, message_from_bytes(raw), include_body=True)
@@ -252,22 +284,20 @@ class GenericImapClient:
                 status, data = imap.uid("search", None, "ALL")
                 if status != "OK" or not data or not data[0]:
                     continue
-                uids = data[0].split()[-limit:]
-                uids.reverse()
-                for uid in uids:
-                    status, fetched = imap.uid("fetch", uid, "(RFC822)")
-                    if status != "OK" or not fetched:
-                        continue
-                    raw = next((item[1] for item in fetched if isinstance(item, tuple) and item[1]), None)
-                    if not raw:
-                        continue
-                    parsed_message = message_from_bytes(raw)
-                    if not self._matches_recipient(parsed_message, recipient_email, include_aliases):
-                        continue
-                    message = format_message(uid, parsed_message, include_body=True)
-                    message["uid"] = self._scoped_uid(folder, uid)
-                    if message.get("code"):
-                        return message
+                for uid_page in self._recent_uid_pages(data[0], max(limit, HEADER_SCAN_MAX_UIDS)):
+                    for uid in uid_page:
+                        header_message = self._fetch_message(imap, uid, HEADER_FETCH_FIELDS)
+                        if not header_message:
+                            continue
+                        if not self._matches_recipient(header_message, recipient_email, include_aliases):
+                            continue
+                        parsed_message = self._fetch_message(imap, uid, "(RFC822)")
+                        if not parsed_message:
+                            continue
+                        message = format_message(uid, parsed_message, include_body=True)
+                        message["uid"] = self._scoped_uid(folder, uid)
+                        if message.get("code"):
+                            return message
             if errors:
                 raise RuntimeError("无法打开收件箱：" + "；".join(errors))
             return None
