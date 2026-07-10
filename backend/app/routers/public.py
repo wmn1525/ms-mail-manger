@@ -5,8 +5,8 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..email_client import MailCredential, OutlookImapClient
-from ..imap_client import GenericImapClient, ImapCredential
-from ..models import IcloudMailbox, ImapConfig, Mailbox
+from ..icloud_cache import find_latest_cached_code, get_cached_message, list_cached_messages
+from ..models import IcloudMailbox, Mailbox
 from ..schemas import CodeOut, MessageDetailOut, MessageListOut, PublicMailboxOut
 from ..security import decrypt_value, verify_public_api_key
 
@@ -43,20 +43,6 @@ def credential_from_mailbox(mailbox: Mailbox) -> MailCredential:
         password=decrypt_value(mailbox.password_enc),
         client_id=decrypt_value(mailbox.client_id_enc),
         token=decrypt_value(mailbox.token_enc),
-    )
-
-
-def imap_credential_from_config(config: ImapConfig) -> ImapCredential:
-    password = decrypt_value(config.password_enc)
-    if not password:
-        raise RuntimeError("缺少 IMAP 密码")
-    return ImapCredential(
-        host=config.host,
-        port=config.port,
-        username=config.username,
-        password=password,
-        folder=config.folder,
-        use_ssl=config.use_ssl,
     )
 
 
@@ -112,13 +98,6 @@ def get_mailbox_by_email(email: EmailStr, db: Session) -> Mailbox:
     raise HTTPException(status_code=404, detail="邮箱不存在")
 
 
-def get_icloud_client(mailbox: IcloudMailbox, db: Session) -> GenericImapClient:
-    config = db.get(ImapConfig, mailbox.imap_config_id)
-    if not config:
-        raise HTTPException(status_code=404, detail="绑定的 IMAP 配置不存在")
-    return GenericImapClient(imap_credential_from_config(config))
-
-
 @router.get("/mailboxes", response_model=list[PublicMailboxOut])
 def list_public_mailboxes(db: Session = Depends(get_db)) -> list[PublicMailboxOut]:
     mailboxes = db.scalars(select(Mailbox).order_by(Mailbox.id.desc())).all()
@@ -145,19 +124,14 @@ def list_public_messages_by_email(
     limit: int = Query(default=30, ge=1, le=100),
     db: Session = Depends(get_db),
 ) -> MessageListOut:
+    """按邮箱返回邮件；iCloud 邮箱只读取本地临时存件。"""
+
     mailbox = get_mailbox_by_email_or_none(str(email), db)
     if not mailbox:
         icloud_mailbox = get_icloud_by_email_or_none(str(email), db)
         if not icloud_mailbox:
             raise HTTPException(status_code=404, detail="邮箱不存在")
-        try:
-            messages = get_icloud_client(icloud_mailbox, db).list_messages(
-                limit=limit,
-                recipient_email=str(email),
-                include_aliases=True,
-            )
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"获取邮件失败：{exc}") from exc
+        messages = list_cached_messages(db, icloud_mailbox.id, limit)
         return MessageListOut(mailbox_id=icloud_mailbox.id, messages=messages)
     try:
         messages = OutlookImapClient(credential_from_mailbox(mailbox)).list_messages(limit=limit)
@@ -172,15 +146,16 @@ def get_public_message_detail_by_email(
     email: EmailStr = Query(...),
     db: Session = Depends(get_db),
 ) -> MessageDetailOut:
+    """按邮箱和公开 UID 返回邮件详情，iCloud 数据来自本地缓存。"""
+
     mailbox = get_mailbox_by_email_or_none(str(email), db)
     if not mailbox:
         icloud_mailbox = get_icloud_by_email_or_none(str(email), db)
         if not icloud_mailbox:
             raise HTTPException(status_code=404, detail="邮箱不存在")
-        try:
-            message = get_icloud_client(icloud_mailbox, db).get_message(uid=uid)
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"获取邮件详情失败：{exc}") from exc
+        message = get_cached_message(db, icloud_mailbox.id, uid)
+        if not message:
+            raise HTTPException(status_code=400, detail="获取邮件详情失败：邮件不存在或缓存已过期")
         return MessageDetailOut(**message)
     try:
         message = OutlookImapClient(credential_from_mailbox(mailbox)).get_message(uid=uid)
@@ -195,19 +170,14 @@ def get_public_latest_code_by_email(
     limit: int = Query(default=10, ge=1, le=30),
     db: Session = Depends(get_db),
 ) -> CodeOut:
+    """按邮箱从最新 limit 封邮件中返回验证码。"""
+
     mailbox = get_mailbox_by_email_or_none(str(email), db)
     if not mailbox:
         icloud_mailbox = get_icloud_by_email_or_none(str(email), db)
         if not icloud_mailbox:
             raise HTTPException(status_code=404, detail="邮箱不存在")
-        try:
-            message = get_icloud_client(icloud_mailbox, db).find_latest_code(
-                limit=limit,
-                recipient_email=str(email),
-                include_aliases=True,
-            )
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"获取验证码失败：{exc}") from exc
+        message = find_latest_cached_code(db, icloud_mailbox.id, limit)
         return CodeOut(
             mailbox_token=icloud_mailbox.public_token,
             email=icloud_mailbox.email,
@@ -243,16 +213,11 @@ def list_public_messages(
     limit: int = Query(default=30, ge=1, le=100),
     db: Session = Depends(get_db),
 ) -> MessageListOut:
+    """按公开 token 返回邮件列表，iCloud 数据不再实时访问 IMAP。"""
+
     icloud_mailbox = get_icloud_by_token(token, db)
     if icloud_mailbox:
-        try:
-            messages = get_icloud_client(icloud_mailbox, db).list_messages(
-                limit=limit,
-                recipient_email=icloud_mailbox.email,
-                include_aliases=True,
-            )
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"获取邮件失败：{exc}") from exc
+        messages = list_cached_messages(db, icloud_mailbox.id, limit)
         return MessageListOut(mailbox_id=icloud_mailbox.id, messages=messages)
     mailbox = get_mailbox_by_token(token, db)
     try:
@@ -264,12 +229,13 @@ def list_public_messages(
 
 @router.get("/mailboxes/{token}/messages/{uid}", response_model=MessageDetailOut)
 def get_public_message_detail(token: str, uid: str, db: Session = Depends(get_db)) -> MessageDetailOut:
+    """按公开 token 和 UID 返回邮件详情。"""
+
     icloud_mailbox = get_icloud_by_token(token, db)
     if icloud_mailbox:
-        try:
-            message = get_icloud_client(icloud_mailbox, db).get_message(uid=uid)
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"获取邮件详情失败：{exc}") from exc
+        message = get_cached_message(db, icloud_mailbox.id, uid)
+        if not message:
+            raise HTTPException(status_code=400, detail="获取邮件详情失败：邮件不存在或缓存已过期")
         return MessageDetailOut(**message)
     mailbox = get_mailbox_by_token(token, db)
     try:
@@ -285,16 +251,11 @@ def get_public_latest_code(
     limit: int = Query(default=10, ge=1, le=30),
     db: Session = Depends(get_db),
 ) -> CodeOut:
+    """按公开 token 查询最新范围内的验证码。"""
+
     icloud_mailbox = get_icloud_by_token(token, db)
     if icloud_mailbox:
-        try:
-            message = get_icloud_client(icloud_mailbox, db).find_latest_code(
-                limit=limit,
-                recipient_email=icloud_mailbox.email,
-                include_aliases=True,
-            )
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"获取验证码失败：{exc}") from exc
+        message = find_latest_cached_code(db, icloud_mailbox.id, limit)
         return CodeOut(
             mailbox_token=icloud_mailbox.public_token,
             email=icloud_mailbox.email,
@@ -320,16 +281,11 @@ def get_token_latest_code(
     limit: int = Query(default=10, ge=1, le=30),
     db: Session = Depends(get_db),
 ) -> CodeOut:
+    """供公开取码页使用，并从 iCloud 缓存读取验证码。"""
+
     icloud_mailbox = get_icloud_by_token(token, db)
     if icloud_mailbox:
-        try:
-            message = get_icloud_client(icloud_mailbox, db).find_latest_code(
-                limit=limit,
-                recipient_email=icloud_mailbox.email,
-                include_aliases=True,
-            )
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"获取验证码失败：{exc}") from exc
+        message = find_latest_cached_code(db, icloud_mailbox.id, limit)
         return CodeOut(
             mailbox_token=icloud_mailbox.public_token,
             email=icloud_mailbox.email,

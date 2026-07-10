@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import get_settings
 from .db import init_db
+from .imap_sync_manager import imap_sync_manager
 from .routers import api_keys, auth, icloud_mailboxes, imap_configs, mailboxes, public
 
 
@@ -24,7 +25,17 @@ app.add_middleware(
 
 @app.on_event("startup")
 def startup() -> None:
+    """初始化数据库后启动普通 IMAP 增量同步任务。"""
+
     init_db()
+    imap_sync_manager.start()
+
+
+@app.on_event("shutdown")
+def shutdown() -> None:
+    """应用退出时停止后台连接，避免容器重启遗留线程。"""
+
+    imap_sync_manager.stop()
 
 
 @app.get("/health")

@@ -35,6 +35,52 @@ HEADER_FETCH_FIELDS = (
 )
 HEADER_SCAN_PAGE_SIZE = 20
 HEADER_SCAN_MAX_UIDS = 200
+IMAP_TIMEOUT_SECONDS = 15
+
+
+def normalize_email(value: str) -> str:
+    """统一邮件地址大小写和首尾空白，保证缓存映射稳定。"""
+
+    return value.strip().lower()
+
+
+def remove_split_alias(value: str) -> str:
+    """去除本地部分的加号别名，把分裂地址归一到基础邮箱。"""
+
+    local, separator, domain = normalize_email(value).rpartition("@")
+    if not separator:
+        return normalize_email(value)
+    return f"{local.split('+', 1)[0]}@{domain}"
+
+
+def message_recipients(message: Message) -> set[str]:
+    """从常见投递头中提取全部收件人，兼容网易转发邮件头。"""
+
+    values: list[str] = []
+    for header in RECIPIENT_HEADERS:
+        values.extend(message.get_all(header, []))
+    addresses = {normalize_email(address) for _, address in getaddresses(values) if address}
+    for value in values:
+        addresses.update(normalize_email(item) for item in re.findall(r"[\w.+-]+@[\w.-]+", value))
+    return addresses
+
+
+def scoped_uid(folder: str, uid: bytes | str | int) -> str:
+    """把远端 UID 与目录编码为现有公开接口使用的稳定 UID。"""
+
+    uid_value = uid.decode("ascii", errors="ignore") if isinstance(uid, bytes) else str(uid)
+    folder_value = base64.urlsafe_b64encode(folder.encode("utf-8")).decode("ascii")
+    return f"imap:{folder_value}:{uid_value}"
+
+
+def parse_scoped_uid(uid: str) -> tuple[str | None, str]:
+    """解析公开 UID；旧的裸 UID 仍由普通 IMAP 详情读取逻辑处理。"""
+
+    parts = uid.split(":", 2)
+    if len(parts) != 3 or parts[0] != "imap":
+        return None, uid
+    folder = base64.urlsafe_b64decode(parts[1].encode("ascii")).decode("utf-8")
+    return folder, parts[2]
 
 
 @dataclass
@@ -60,27 +106,13 @@ class GenericImapClient:
         return ["INBOX"]
 
     def _normalize_email(self, value: str) -> str:
-        return value.strip().lower()
+        return normalize_email(value)
 
     def _remove_split_alias(self, value: str) -> str:
-        local, separator, domain = self._normalize_email(value).rpartition("@")
-        if not separator:
-            return self._normalize_email(value)
-        return f"{local.split('+', 1)[0]}@{domain}"
-
-    def _has_split_alias(self, value: str) -> bool:
-        local, separator, _ = self._normalize_email(value).rpartition("@")
-        return bool(separator and "+" in local)
+        return remove_split_alias(value)
 
     def _message_recipients(self, message: Message) -> set[str]:
-        values: list[str] = []
-        for header in RECIPIENT_HEADERS:
-            values.extend(message.get_all(header, []))
-        addresses = {self._normalize_email(address) for _, address in getaddresses(values) if address}
-        # 有些转发头会把地址放在裸文本里，补一层轻量兜底解析。
-        for value in values:
-            addresses.update(self._normalize_email(item) for item in re.findall(r"[\w.+-]+@[\w.-]+", value))
-        return addresses
+        return message_recipients(message)
 
     def _matches_recipient(self, message: Message, recipient_email: str | None, include_aliases: bool) -> bool:
         if not recipient_email:
@@ -126,23 +158,22 @@ class GenericImapClient:
         raise RuntimeError(f"{folder}: {'；'.join(errors)}")
 
     def _scoped_uid(self, folder: str, uid: bytes | str) -> str:
-        uid_value = uid.decode("ascii", errors="ignore") if isinstance(uid, bytes) else uid
-        folder_value = base64.urlsafe_b64encode(folder.encode("utf-8")).decode("ascii")
-        return f"imap:{folder_value}:{uid_value}"
+        return scoped_uid(folder, uid)
 
     def _parse_uid(self, uid: str) -> tuple[str | None, str]:
-        parts = uid.split(":", 2)
-        if len(parts) != 3 or parts[0] != "imap":
-            return None, uid
-        folder = base64.urlsafe_b64decode(parts[1].encode("ascii")).decode("utf-8")
-        return folder, parts[2]
+        return parse_scoped_uid(uid)
 
     def _open(self) -> imaplib.IMAP4:
         if self.credential.use_ssl:
             context = ssl.create_default_context()
-            imap = imaplib.IMAP4_SSL(self.credential.host, self.credential.port, ssl_context=context)
+            imap = imaplib.IMAP4_SSL(
+                self.credential.host,
+                self.credential.port,
+                ssl_context=context,
+                timeout=IMAP_TIMEOUT_SECONDS,
+            )
         else:
-            imap = imaplib.IMAP4(self.credential.host, self.credential.port)
+            imap = imaplib.IMAP4(self.credential.host, self.credential.port, timeout=IMAP_TIMEOUT_SECONDS)
         try:
             imap.login(self.credential.username, self.credential.password)
             # 部分 Coremail 服务要求客户端声明 ID，否则 SELECT 会被判定为 unsafe login。
@@ -172,6 +203,23 @@ class GenericImapClient:
             raise RuntimeError("无法打开收件箱：" + "；".join(errors))
         finally:
             imap.logout()
+
+    def open_selected(self) -> imaplib.IMAP4:
+        """打开持久连接并以只读方式选择 INBOX，供后台增量同步复用。"""
+
+        imap = self._open()
+        try:
+            status, data = imap.select("INBOX", readonly=True)
+            if status != "OK":
+                error = "; ".join(item.decode("utf-8", errors="replace") for item in data if item)
+                raise RuntimeError(f"INBOX: {error or status}")
+            return imap
+        except Exception:
+            try:
+                imap.logout()
+            except Exception:
+                pass
+            raise
 
     def list_messages(
         self,
