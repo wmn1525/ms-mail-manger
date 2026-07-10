@@ -51,19 +51,11 @@ def credential_from_config(config: ImapConfig) -> ImapCredential:
     )
 
 
-def refresh_config_folders(config: ImapConfig) -> None:
-    """从 IMAP 服务器自动发现目录，失败时保留原有目录。"""
-
-    folders = GenericImapClient(credential_from_config(config)).list_folders()
-    config.folder = "\n".join(folders)
-
-
 def check_config_model(config: ImapConfig) -> CheckOut:
     """测活并把结果写回 IMAP 配置状态。"""
 
     checked_at = datetime.now(UTC)
     try:
-        refresh_config_folders(config)
         GenericImapClient(credential_from_config(config)).check_alive()
         config.status = "live"
         config.last_error = None
@@ -92,11 +84,6 @@ def create_imap_config(payload: ImapConfigCreate, db: Session = Depends(get_db))
         use_ssl=payload.use_ssl,
         remark=payload.remark,
     )
-    try:
-        refresh_config_folders(config)
-    except Exception as exc:
-        config.status = "dead"
-        config.last_error = f"自动获取目录失败：{exc}"
     db.add(config)
     db.commit()
     db.refresh(config)
@@ -123,11 +110,7 @@ def update_imap_config(
     config.status = "unknown"
     config.last_error = None
     config.last_checked_at = None
-    try:
-        refresh_config_folders(config)
-    except Exception as exc:
-        config.status = "dead"
-        config.last_error = f"自动获取目录失败：{exc}"
+    config.folder = "INBOX"
     db.commit()
     db.refresh(config)
     return imap_config_out(config)

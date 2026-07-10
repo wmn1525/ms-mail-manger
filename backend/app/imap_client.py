@@ -56,8 +56,8 @@ class GenericImapClient:
         self.credential = credential
 
     def _folders(self) -> list[str]:
-        folders = [item.strip() for item in re.split(r"[\n,，]+", self.credential.folder or "INBOX")]
-        return [folder for folder in folders if folder] or ["INBOX"]
+        # 163 等共享接码箱目录多且响应慢，取码只扫描收件箱避免逐目录全量搜索。
+        return ["INBOX"]
 
     def _normalize_email(self, value: str) -> str:
         return value.strip().lower()
@@ -137,15 +137,6 @@ class GenericImapClient:
         folder = base64.urlsafe_b64decode(parts[1].encode("ascii")).decode("utf-8")
         return folder, parts[2]
 
-    def _parse_folder_line(self, value: bytes) -> str | None:
-        # IMAP LIST 返回的最后一个带引号字段通常就是服务器真实目录名。
-        text = value.decode("utf-8", errors="replace")
-        quoted = re.findall(r'"((?:[^"\\]|\\.)*)"', text)
-        if quoted:
-            return quoted[-1].replace(r"\"", '"').strip()
-        parts = text.rsplit(" ", 1)
-        return parts[-1].strip() if parts else None
-
     def _open(self) -> imaplib.IMAP4:
         if self.credential.use_ssl:
             context = ssl.create_default_context()
@@ -167,23 +158,6 @@ class GenericImapClient:
             except Exception:
                 pass
             raise
-
-    def list_folders(self) -> list[str]:
-        imap = self._open()
-        try:
-            status, data = imap.list()
-            if status != "OK" or not data:
-                raise RuntimeError("无法获取 IMAP 目录列表")
-            folders: list[str] = []
-            for item in data:
-                if not item:
-                    continue
-                folder = self._parse_folder_line(item)
-                if folder and folder not in folders:
-                    folders.append(folder)
-            return folders or ["INBOX"]
-        finally:
-            imap.logout()
 
     def check_alive(self) -> None:
         imap = self._open()
