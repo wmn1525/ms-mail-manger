@@ -3,17 +3,13 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-<<<<<<< HEAD
 from ..email_address import remove_split_alias
-from ..imap_client import GenericImapClient, ImapCredential
-=======
 from ..icloud_cache import (
     delete_mailbox_cache,
     get_cached_message,
     list_cached_messages,
     request_config_backfill,
 )
->>>>>>> 1e104d0dfe6406c6cbc7689a4636cd90d70e15eb
 from ..models import IcloudMailbox, ImapConfig, Mailbox
 from ..schemas import (
     IcloudImportIn,
