@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..db import get_db
+from ..icloud_cache import reset_config_cache
 from ..imap_client import GenericImapClient, ImapCredential
 from ..models import IcloudMailbox, ImapConfig
 from ..schemas import CheckOut, ImapConfigCreate, ImapConfigOut, ImapConfigUpdate
@@ -51,19 +52,11 @@ def credential_from_config(config: ImapConfig) -> ImapCredential:
     )
 
 
-def refresh_config_folders(config: ImapConfig) -> None:
-    """从 IMAP 服务器自动发现目录，失败时保留原有目录。"""
-
-    folders = GenericImapClient(credential_from_config(config)).list_folders()
-    config.folder = "\n".join(folders)
-
-
 def check_config_model(config: ImapConfig) -> CheckOut:
     """测活并把结果写回 IMAP 配置状态。"""
 
     checked_at = datetime.now(UTC)
     try:
-        refresh_config_folders(config)
         GenericImapClient(credential_from_config(config)).check_alive()
         config.status = "live"
         config.last_error = None
@@ -92,11 +85,6 @@ def create_imap_config(payload: ImapConfigCreate, db: Session = Depends(get_db))
         use_ssl=payload.use_ssl,
         remark=payload.remark,
     )
-    try:
-        refresh_config_folders(config)
-    except Exception as exc:
-        config.status = "dead"
-        config.last_error = f"自动获取目录失败：{exc}"
     db.add(config)
     db.commit()
     db.refresh(config)
@@ -109,9 +97,12 @@ def update_imap_config(
     payload: ImapConfigUpdate,
     db: Session = Depends(get_db),
 ) -> ImapConfigOut:
+    """更新 IMAP 连接参数，账号身份变化时重建本地缓存。"""
+
     config = db.get(ImapConfig, config_id)
     if not config:
         raise HTTPException(status_code=404, detail="IMAP 配置不存在")
+    previous_identity = (config.host, config.port, config.username, config.use_ssl)
     config.name = payload.name.strip()
     config.host = payload.host.strip()
     config.port = payload.port
@@ -123,11 +114,10 @@ def update_imap_config(
     config.status = "unknown"
     config.last_error = None
     config.last_checked_at = None
-    try:
-        refresh_config_folders(config)
-    except Exception as exc:
-        config.status = "dead"
-        config.last_error = f"自动获取目录失败：{exc}"
+    config.folder = "INBOX"
+    current_identity = (config.host, config.port, config.username, config.use_ssl)
+    if current_identity != previous_identity:
+        reset_config_cache(db, config.id)
     db.commit()
     db.refresh(config)
     return imap_config_out(config)
@@ -145,12 +135,15 @@ def check_imap_config(config_id: int, db: Session = Depends(get_db)) -> CheckOut
 
 @router.delete("/{config_id}")
 def delete_imap_config(config_id: int, db: Session = Depends(get_db)) -> dict:
+    """删除未绑定邮箱的 IMAP 配置及其同步状态。"""
+
     config = db.get(ImapConfig, config_id)
     if not config:
         raise HTTPException(status_code=404, detail="IMAP 配置不存在")
     used = db.scalar(select(IcloudMailbox.id).where(IcloudMailbox.imap_config_id == config_id).limit(1))
     if used:
         raise HTTPException(status_code=400, detail="该 IMAP 配置已绑定 iCloud 邮箱，不能删除")
+    reset_config_cache(db, config.id)
     db.delete(config)
     db.commit()
     return {"ok": True}
