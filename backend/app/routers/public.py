@@ -4,6 +4,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..db import get_db
+from ..email_address import remove_split_alias
 from ..email_client import MailCredential, OutlookImapClient
 from ..imap_client import GenericImapClient, ImapCredential
 from ..models import IcloudMailbox, ImapConfig, Mailbox
@@ -69,15 +70,6 @@ def get_mailbox_by_token(token: str, db: Session) -> Mailbox:
 
 def get_icloud_by_token(token: str, db: Session) -> IcloudMailbox | None:
     return db.scalar(select(IcloudMailbox).where(IcloudMailbox.public_token == token))
-
-
-def remove_split_alias(email: str) -> str:
-    value = email.strip().lower()
-    local, separator, domain = value.rpartition("@")
-    if not separator:
-        return value
-    base_local = local.split("+", 1)[0]
-    return f"{base_local}@{domain}"
 
 
 def get_mailbox_by_email_or_none(email: str, db: Session) -> Mailbox | None:

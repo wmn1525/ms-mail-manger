@@ -5,6 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..db import get_db
+from ..email_address import remove_split_alias
 from ..email_client import MailCredential, OutlookImapClient
 from ..models import Mailbox
 from ..schemas import (
@@ -107,14 +108,34 @@ def check_mailbox_model(mailbox: Mailbox) -> CheckOut:
 def list_mailboxes(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
+    email: str | None = Query(default=None, max_length=320),
     db: Session = Depends(get_db),
 ) -> MailboxListOut:
+    """分页查询微软邮箱，分裂地址会先回源到原始邮箱。"""
+
     offset = (page - 1) * page_size
-    mailboxes = db.scalars(select(Mailbox).order_by(Mailbox.id.desc()).offset(offset).limit(page_size)).all()
-    total = db.scalar(select(func.count()).select_from(Mailbox)) or 0
-    live = db.scalar(select(func.count()).select_from(Mailbox).where(Mailbox.status == "live")) or 0
-    dead = db.scalar(select(func.count()).select_from(Mailbox).where(Mailbox.status == "dead")) or 0
-    with_token = db.scalar(select(func.count()).select_from(Mailbox).where(Mailbox.token_enc.is_not(None))) or 0
+    email_filter = (
+        func.lower(Mailbox.email) == remove_split_alias(email)
+        if email and email.strip()
+        else None
+    )
+    mailbox_query = select(Mailbox)
+    count_query = select(func.count()).select_from(Mailbox)
+    if email_filter is not None:
+        mailbox_query = mailbox_query.where(email_filter)
+        count_query = count_query.where(email_filter)
+    mailboxes = db.scalars(mailbox_query.order_by(Mailbox.id.desc()).offset(offset).limit(page_size)).all()
+    total = db.scalar(count_query) or 0
+    live_query = select(func.count()).select_from(Mailbox).where(Mailbox.status == "live")
+    dead_query = select(func.count()).select_from(Mailbox).where(Mailbox.status == "dead")
+    token_query = select(func.count()).select_from(Mailbox).where(Mailbox.token_enc.is_not(None))
+    if email_filter is not None:
+        live_query = live_query.where(email_filter)
+        dead_query = dead_query.where(email_filter)
+        token_query = token_query.where(email_filter)
+    live = db.scalar(live_query) or 0
+    dead = db.scalar(dead_query) or 0
+    with_token = db.scalar(token_query) or 0
     return MailboxListOut(
         items=[mailbox_out(mailbox) for mailbox in mailboxes],
         total=total,

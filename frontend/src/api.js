@@ -44,8 +44,10 @@ export const api = {
   createApiKey: (name) => request("/api-keys", { method: "POST", body: JSON.stringify({ name }) }),
   updateApiKey: (id, enabled) => request(`/api-keys/${id}`, { method: "PATCH", body: JSON.stringify({ enabled }) }),
   deleteApiKey: (id) => request(`/api-keys/${id}`, { method: "DELETE" }),
-  mailboxes: (page = 1, pageSize = 20) =>
-    request(`/mailboxes?page=${encodeURIComponent(page)}&page_size=${encodeURIComponent(pageSize)}`),
+  mailboxes: (page = 1, pageSize = 20, email = "") =>
+    request(
+      `/mailboxes?page=${encodeURIComponent(page)}&page_size=${encodeURIComponent(pageSize)}${email.trim() ? `&email=${encodeURIComponent(email.trim())}` : ""}`,
+    ),
   createMailbox: (payload) => request("/mailboxes", { method: "POST", body: JSON.stringify(payload) }),
   importMailboxes: (content) =>
     request("/mailboxes/import", { method: "POST", body: JSON.stringify({ content }) }),
@@ -61,8 +63,10 @@ export const api = {
     request(`/imap-configs/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
   checkImapConfig: (id) => request(`/imap-configs/${id}/check`, { method: "POST" }),
   deleteImapConfig: (id) => request(`/imap-configs/${id}`, { method: "DELETE" }),
-  icloudMailboxes: (page = 1, pageSize = 20) =>
-    request(`/icloud-mailboxes?page=${encodeURIComponent(page)}&page_size=${encodeURIComponent(pageSize)}`),
+  icloudMailboxes: (page = 1, pageSize = 20, email = "") =>
+    request(
+      `/icloud-mailboxes?page=${encodeURIComponent(page)}&page_size=${encodeURIComponent(pageSize)}${email.trim() ? `&email=${encodeURIComponent(email.trim())}` : ""}`,
+    ),
   createIcloudMailbox: (payload) => request("/icloud-mailboxes", { method: "POST", body: JSON.stringify(payload) }),
   importIcloudMailboxes: (payload) =>
     request("/icloud-mailboxes/import", { method: "POST", body: JSON.stringify(payload) }),

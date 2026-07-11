@@ -3,6 +3,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..db import get_db
+from ..email_address import remove_split_alias
 from ..imap_client import GenericImapClient, ImapCredential
 from ..models import IcloudMailbox, ImapConfig, Mailbox
 from ..schemas import (
@@ -97,17 +98,26 @@ def icloud_client_from_mailbox(mailbox: IcloudMailbox, db: Session) -> GenericIm
 def list_icloud_mailboxes(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
+    email: str | None = Query(default=None, max_length=320),
     db: Session = Depends(get_db),
 ) -> IcloudMailboxListOut:
+    """分页查询 iCloud 邮箱，分裂地址会先回源到原始邮箱。"""
+
     offset = (page - 1) * page_size
-    rows = db.execute(
-        select(IcloudMailbox, ImapConfig.name)
-        .join(ImapConfig, IcloudMailbox.imap_config_id == ImapConfig.id)
-        .order_by(IcloudMailbox.id.desc())
-        .offset(offset)
-        .limit(page_size)
-    ).all()
-    total = db.scalar(select(func.count()).select_from(IcloudMailbox)) or 0
+    email_filter = (
+        func.lower(IcloudMailbox.email) == remove_split_alias(email)
+        if email and email.strip()
+        else None
+    )
+    mailbox_query = select(IcloudMailbox, ImapConfig.name).join(
+        ImapConfig, IcloudMailbox.imap_config_id == ImapConfig.id
+    )
+    count_query = select(func.count()).select_from(IcloudMailbox)
+    if email_filter is not None:
+        mailbox_query = mailbox_query.where(email_filter)
+        count_query = count_query.where(email_filter)
+    rows = db.execute(mailbox_query.order_by(IcloudMailbox.id.desc()).offset(offset).limit(page_size)).all()
+    total = db.scalar(count_query) or 0
     return IcloudMailboxListOut(
         items=[icloud_mailbox_out(mailbox, config_name) for mailbox, config_name in rows],
         total=total,

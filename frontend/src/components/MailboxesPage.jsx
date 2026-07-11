@@ -53,7 +53,7 @@ export function MailboxesPage() {
   async function loadMailboxes() {
     setLoading(true);
     try {
-      const data = await api.mailboxes(page, pageSize);
+      const data = await api.mailboxes(page, pageSize, search);
       setMailboxes(data.items);
       setTotal(data.total);
       setStats({ live: data.live, dead: data.dead, withToken: data.with_token });
@@ -66,7 +66,7 @@ export function MailboxesPage() {
 
   useEffect(() => {
     loadMailboxes();
-  }, [page, pageSize]);
+  }, [page, pageSize, search]);
 
   async function handleCheck(record) {
     setCheckingId(record.id);
@@ -180,12 +180,6 @@ export function MailboxesPage() {
     [stats, total],
   );
 
-  const filtered = useMemo(() => {
-    const keyword = search.trim().toLowerCase();
-    if (!keyword) return mailboxes;
-    return mailboxes.filter((item) => [item.email, item.remark, item.public_token].some((value) => String(value || "").toLowerCase().includes(keyword)));
-  }, [mailboxes, search]);
-
   const columns = useMemo(
     () => [
       {
@@ -272,9 +266,12 @@ export function MailboxesPage() {
           </Card>
         ))}
       </section>
-      <Card className="table-card" title={<MailboxToolbar total={total} count={filtered.length} search={search} onSearch={setSearch} />} bodyStyle={{ padding: 0 }}>
-        <Table rowKey="id" columns={columns} dataSource={filtered} loading={loading} rowSelection={{ selectedRowKeys, onChange: setSelectedRowKeys }} pagination={false} empty={<Empty title={search.trim() ? "未找到匹配邮箱" : "暂无邮箱"} />} />
-        <MailboxPagination currentPage={page} pageSize={pageSize} total={total} currentCount={filtered.length} onPageChange={setPage} onPageSizeChange={(value) => {
+      <Card className="table-card" title={<MailboxToolbar total={total} count={mailboxes.length} search={search} onSearch={(value) => {
+        setPage(1);
+        setSearch(value);
+      }} />} bodyStyle={{ padding: 0 }}>
+        <Table rowKey="id" columns={columns} dataSource={mailboxes} loading={loading} rowSelection={{ selectedRowKeys, onChange: setSelectedRowKeys }} pagination={false} empty={<Empty title={search.trim() ? "未找到原始邮箱" : "暂无邮箱"} />} />
+        <MailboxPagination currentPage={page} pageSize={pageSize} total={total} currentCount={mailboxes.length} onPageChange={setPage} onPageSizeChange={(value) => {
           setPage(1);
           setPageSize(Number(value));
         }} />
@@ -310,7 +307,7 @@ function MailboxToolbar({ total, count, search, onSearch }) {
         <Text strong>邮箱列表</Text>
         <Text type="tertiary">支持密码或 Microsoft OAuth IMAP 凭据 · 共 {total} 个，当前显示 {count} 个</Text>
       </div>
-      <Input className="mail-search" value={search} onChange={onSearch} showClear prefix={<IconSearch />} placeholder="搜索邮箱、备注或 Token" />
+      <Input className="mail-search" value={search} onChange={onSearch} showClear prefix={<IconSearch />} placeholder="输入原始邮箱或分裂邮箱查询" />
     </div>
   );
 }

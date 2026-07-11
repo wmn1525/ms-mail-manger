@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Button, Card, Empty, Form, Input, Modal, Popconfirm, Space, Table, Tag, TextArea, Toast, Tooltip, Typography } from "@douyinfe/semi-ui";
-import { IconCopy, IconDelete, IconDownload, IconInbox, IconPlus, IconUpload } from "@douyinfe/semi-icons";
+import { IconCopy, IconDelete, IconDownload, IconInbox, IconPlus, IconSearch, IconUpload } from "@douyinfe/semi-icons";
 import { api } from "../api";
 import { MailboxPagination } from "./MailboxPagination";
 import { DEFAULT_MAILBOX_PAGE_SIZE } from "../constants/mailbox";
@@ -12,6 +12,7 @@ const { Text } = Typography;
 // iCloud 转发邮箱管理页，邮箱会绑定到指定 IMAP 接收箱。
 export function IcloudMailboxesPage() {
   const [mailboxes, setMailboxes] = useState([]);
+  const [search, setSearch] = useState("");
   const [configs, setConfigs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
@@ -33,7 +34,7 @@ export function IcloudMailboxesPage() {
   async function loadMailboxes() {
     setLoading(true);
     try {
-      const data = await api.icloudMailboxes(page, pageSize);
+      const data = await api.icloudMailboxes(page, pageSize, search);
       setMailboxes(data.items);
       setTotal(data.total);
     } catch (error) {
@@ -53,7 +54,7 @@ export function IcloudMailboxesPage() {
 
   useEffect(() => {
     loadMailboxes();
-  }, [page, pageSize]);
+  }, [page, pageSize, search]);
 
   useEffect(() => {
     loadConfigs();
@@ -178,7 +179,25 @@ export function IcloudMailboxesPage() {
           </Button>
         </Space>
       </section>
-      <Card className="table-card" bodyStyle={{ padding: 0 }}>
+      <Card className="table-card" title={(
+        <div className="mailbox-toolbar">
+          <div className="mailbox-toolbar__text">
+            <Text strong>邮箱列表</Text>
+            <Text type="tertiary">共 {total} 个，当前显示 {mailboxes.length} 个</Text>
+          </div>
+          <Input
+            className="mail-search"
+            value={search}
+            onChange={(value) => {
+              setPage(1);
+              setSearch(value);
+            }}
+            showClear
+            prefix={<IconSearch />}
+            placeholder="输入原始邮箱或分裂邮箱查询"
+          />
+        </div>
+      )} bodyStyle={{ padding: 0 }}>
         <Table
           rowKey="id"
           columns={columns}
@@ -186,7 +205,7 @@ export function IcloudMailboxesPage() {
           loading={loading}
           pagination={false}
           rowSelection={{ selectedRowKeys, onChange: (keys) => setSelectedRowKeys(keys) }}
-          empty={<Empty title="暂无 iCloud 邮箱" description="请先新增 IMAP 配置，再导入 iCloud 邮箱" />}
+          empty={<Empty title={search.trim() ? "未找到原始邮箱" : "暂无 iCloud 邮箱"} description={search.trim() ? "请检查输入的邮箱地址" : "请先新增 IMAP 配置，再导入 iCloud 邮箱"} />}
         />
         <MailboxPagination
           currentPage={page}
