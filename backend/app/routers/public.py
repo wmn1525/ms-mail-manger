@@ -10,7 +10,7 @@ from ..icloud_cache import find_latest_cached_code, get_cached_message, list_cac
 from ..models import IcloudMailbox, Mailbox, ThirdPartyIcloudMailbox
 from ..schemas import CodeOut, MessageDetailOut, MessageListOut, PublicMailboxOut
 from ..security import decrypt_value, verify_public_api_key
-from ..third_party_icloud_client import fetch_latest_code
+from ..third_party_icloud_client import build_fetch_url, fetch_latest_code
 
 
 router = APIRouter(prefix="/public", tags=["public"], dependencies=[Depends(verify_public_api_key)])
@@ -194,12 +194,14 @@ def get_public_latest_code_by_email(
             fetch_url = decrypt_value(third_party_mailbox.fetch_url_enc)
             if not fetch_url:
                 raise ValueError("第三方 iCloud 取码链接为空")
-            code = fetch_latest_code(third_party_mailbox.email, fetch_url)
+            requested_email = str(email).strip().lower()
+            target_url = build_fetch_url(third_party_mailbox.email, fetch_url, requested_email)
+            code = fetch_latest_code(requested_email, target_url)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"获取验证码失败：{exc}") from exc
         return CodeOut(
             mailbox_token=third_party_mailbox.public_token,
-            email=third_party_mailbox.email,
+            email=requested_email,
             code=code,
             message=None,
         )

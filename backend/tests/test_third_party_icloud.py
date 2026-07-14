@@ -13,6 +13,7 @@ from backend.app.routers.third_party_icloud_mailboxes import parse_import_line, 
 from backend.app.security import encrypt_value
 from backend.app.third_party_icloud_client import (
     ThirdPartyIcloudError,
+    build_fetch_url,
     extract_page_code,
     fetch_latest_code,
     validate_fetch_url,
@@ -100,6 +101,15 @@ class ThirdPartyIcloudClientTestCase(unittest.TestCase):
         with patch("backend.app.third_party_icloud_client.urlopen", return_value=response):
             self.assertEqual(fetch_latest_code(EMAIL, FETCH_URL), "123456")
 
+    def test_build_fetch_url_keeps_split_alias(self) -> None:
+        """第三方分裂取码必须把完整别名放到上游链接末尾。"""
+
+        alias = "user+split@icloud.com"
+        self.assertEqual(
+            build_fetch_url(EMAIL, FETCH_URL, alias),
+            "http://icloudapi.xyz/show/access-token/user+split@icloud.com",
+        )
+
     def test_fetch_latest_code_rejects_telemetry_json(self) -> None:
         """性能上报 JSON 中的内存数字不能被当成验证码。"""
 
@@ -131,13 +141,17 @@ class ThirdPartyIcloudClientTestCase(unittest.TestCase):
             )
             db.add(mailbox)
             db.commit()
-            with patch("backend.app.routers.public.fetch_latest_code", return_value="654321"):
+            with patch("backend.app.routers.public.fetch_latest_code", return_value="654321") as fetch_code:
                 result = get_public_latest_code_by_email(
                     email="user+split@icloud.com",
                     limit=10,
                     db=db,
                 )
-        self.assertEqual(result.email, EMAIL)
+        fetch_code.assert_called_once_with(
+            "user+split@icloud.com",
+            "http://icloudapi.xyz/show/access-token/user+split@icloud.com",
+        )
+        self.assertEqual(str(result.email), "user+split@icloud.com")
         self.assertEqual(result.mailbox_token, "tk_third_party_test")
         self.assertEqual(result.code, "654321")
 

@@ -31,7 +31,7 @@ X-API-Key: your_api_key
 
 支持 Microsoft 邮箱、iCloud 转发邮箱和第三方 iCloud 邮箱。第三方 iCloud 会实时访问已加密保存的取码链接。
 
-也支持自动识别分裂别名，例如 \`user+abcd@icloud.com\` 会回源查询 \`user@icloud.com\`。
+也支持自动识别分裂别名。第三方 iCloud 会用基础邮箱定位取码配置，再把完整的 \`user+abcd@icloud.com\` 地址传给上游取码链接。
 
 ## 按 Token 获取最近验证码
 

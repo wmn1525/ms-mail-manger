@@ -3,7 +3,7 @@
 from html.parser import HTMLParser
 import re
 from urllib.error import HTTPError, URLError
-from urllib.parse import unquote, urlsplit
+from urllib.parse import quote, unquote, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 
@@ -71,6 +71,17 @@ def validate_fetch_url(email: str, fetch_url: str) -> str:
     if linked_email.lower() != email.strip().lower():
         raise ValueError("取码链接中的邮箱与导入邮箱不一致")
     return value
+
+
+def build_fetch_url(base_email: str, fetch_url: str, target_email: str) -> str:
+    """保留访问令牌并把链接末尾邮箱替换为本次请求的分裂地址。"""
+
+    validated_url = validate_fetch_url(base_email, fetch_url)
+    parsed = urlsplit(validated_url)
+    path_prefix = parsed.path.rsplit("/", 1)[0]
+    target_path = f"{path_prefix}/{quote(target_email.strip().lower(), safe='@+')}"
+    target_url = urlunsplit((parsed.scheme, parsed.netloc, target_path, "", ""))
+    return validate_fetch_url(target_email, target_url)
 
 
 def extract_page_code(content: str) -> str | None:
