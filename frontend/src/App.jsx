@@ -16,6 +16,7 @@ export default function App() {
         <Route path="/admin" element={<Navigate to="/admin/mailboxes" replace />} />
         <Route path="/admin/mailboxes" element={<AuthApp initialPage="admin" />} />
         <Route path="/admin/icloud-mailboxes" element={<AuthApp initialPage="admin" />} />
+        <Route path="/admin/third-party-icloud" element={<AuthApp initialPage="admin" />} />
         <Route path="/admin/imap-configs" element={<AuthApp initialPage="admin" />} />
         <Route path="/admin/api-keys" element={<AuthApp initialPage="admin" />} />
         <Route path="/" element={<Navigate to={getToken() ? "/admin/mailboxes" : "/login"} replace />} />

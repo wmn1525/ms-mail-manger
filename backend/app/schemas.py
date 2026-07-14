@@ -143,6 +143,50 @@ class IcloudImportIn(BaseModel):
     content: str = Field(..., description="每行：邮箱 或 邮箱----备注")
 
 
+class ThirdPartyIcloudMailboxOut(BaseModel):
+    """后台展示第三方 iCloud 邮箱，不返回敏感取码链接。"""
+
+    # 第三方邮箱记录主键。
+    id: int
+    # 用于管理和分裂导出的基础邮箱。
+    email: EmailStr
+    # 记录首次导入时间。
+    created_at: datetime
+    # 记录取码链接最后更新时间。
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ThirdPartyIcloudMailboxListOut(BaseModel):
+    """第三方 iCloud 邮箱分页结果。"""
+
+    # 当前页邮箱记录。
+    items: list[ThirdPartyIcloudMailboxOut]
+    # 当前筛选条件下的记录总数。
+    total: int
+    # 当前页码。
+    page: int
+    # 每页记录数。
+    page_size: int
+
+
+class ThirdPartyIcloudImportIn(BaseModel):
+    """批量导入邮箱与 icloudapi.xyz 取码链接。"""
+
+    # 每行必须包含邮箱和与其匹配的取码链接。
+    content: str = Field(..., description="每行：邮箱----取码链接")
+
+
+class ThirdPartyIcloudCodeOut(BaseModel):
+    """返回第三方页面当前识别到的验证码。"""
+
+    # 验证码所属的基础邮箱。
+    email: EmailStr
+    # 从第三方页面正文识别到的数字验证码。
+    code: str
+
+
 class ImportIn(BaseModel):
     content: str = Field(..., description="每行：邮箱----密码----client_id----令牌")
 

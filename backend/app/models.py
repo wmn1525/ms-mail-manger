@@ -64,6 +64,27 @@ class IcloudMailbox(Base):
     )
 
 
+class ThirdPartyIcloudMailbox(Base):
+    """保存由第三方取码链接读取邮件的 iCloud 邮箱。"""
+
+    __tablename__ = "third_party_icloud_mailboxes"
+
+    # 本地记录主键，只在管理接口中使用。
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    # 基础邮箱用于去重、查询和生成分裂别名。
+    email: Mapped[str] = mapped_column(String(320), unique=True, index=True, nullable=False)
+    # API Key 取码响应沿用统一邮箱结构，因此每条记录保留独立公开标识。
+    public_token: Mapped[str] = mapped_column(String(80), unique=True, index=True, nullable=False)
+    # 取码链接等同访问凭据，必须加密保存且不通过列表接口返回。
+    fetch_url_enc: Mapped[str] = mapped_column(Text, nullable=False)
+    # 创建时间用于后台列表展示。
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # 更新链接时自动刷新该时间，便于判断配置是否为最新。
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class ImapSyncState(Base):
     """保存每个 IMAP 收件箱的增量同步游标和回填进度。"""
 

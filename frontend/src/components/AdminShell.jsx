@@ -6,11 +6,13 @@ import { ApiKeyPage } from "./ApiKeyPage";
 import { IcloudMailboxesPage } from "./IcloudMailboxesPage";
 import { ImapConfigsPage } from "./ImapConfigsPage";
 import { MailboxesPage } from "./MailboxesPage";
+import { ThirdPartyIcloudPage } from "./ThirdPartyIcloudPage";
 
 const { Header, Sider, Content } = Layout;
 const { Text } = Typography;
 
 function getActivePage(pathname) {
+  if (pathname.includes("/third-party-icloud")) return "third-party-icloud";
   if (pathname.includes("/icloud-mailboxes")) return "icloud-mailboxes";
   if (pathname.includes("/imap-configs")) return "imap-configs";
   if (pathname.includes("/api-keys")) return "api-keys";
@@ -54,6 +56,7 @@ export function AdminShell({ username, onLogout }) {
           items={[
             { itemKey: "mailboxes", text: "微软邮箱", icon: <IconInbox /> },
             { itemKey: "icloud-mailboxes", text: "iCloud 邮箱", icon: <IconMail /> },
+            { itemKey: "third-party-icloud", text: "第三方 iCloud", icon: <IconMail /> },
             { itemKey: "imap-configs", text: "IMAP 配置", icon: <IconInbox /> },
             { itemKey: "api-keys", text: "API Key", icon: <IconMail /> },
           ]}
@@ -72,6 +75,7 @@ export function AdminShell({ username, onLogout }) {
         <Content className="content">
           {activePage === "mailboxes" && <MailboxesPage />}
           {activePage === "icloud-mailboxes" && <IcloudMailboxesPage />}
+          {activePage === "third-party-icloud" && <ThirdPartyIcloudPage />}
           {activePage === "imap-configs" && <ImapConfigsPage />}
           {activePage === "api-keys" && <ApiKeyPage />}
         </Content>

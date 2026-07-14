@@ -73,6 +73,15 @@ export const api = {
   deleteIcloudMailbox: (id) => request(`/icloud-mailboxes/${id}`, { method: "DELETE" }),
   icloudMessages: (id, limit = 30) => request(`/icloud-mailboxes/${id}/messages?limit=${limit}`),
   icloudMessageDetail: (id, uid) => request(`/icloud-mailboxes/${id}/messages/${encodeURIComponent(uid)}`),
+  // 第三方取码链接仅在导入时上传，列表接口不会返回链接明文。
+  thirdPartyIcloudMailboxes: (page = 1, pageSize = 20, email = "") =>
+    request(
+      `/third-party-icloud-mailboxes?page=${encodeURIComponent(page)}&page_size=${encodeURIComponent(pageSize)}${email.trim() ? `&email=${encodeURIComponent(email.trim())}` : ""}`,
+    ),
+  importThirdPartyIcloudMailboxes: (content) =>
+    request("/third-party-icloud-mailboxes/import", { method: "POST", body: JSON.stringify({ content }) }),
+  thirdPartyIcloudCode: (id) => request(`/third-party-icloud-mailboxes/${id}/code`),
+  deleteThirdPartyIcloudMailbox: (id) => request(`/third-party-icloud-mailboxes/${id}`, { method: "DELETE" }),
   publicMailboxes: (apiKey) => request(`/public/mailboxes?api_key=${encodeURIComponent(apiKey)}`),
   publicMailbox: (token, apiKey) =>
     request(`/public/mailboxes/${encodeURIComponent(token)}?api_key=${encodeURIComponent(apiKey)}`),

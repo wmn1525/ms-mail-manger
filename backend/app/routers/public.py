@@ -7,9 +7,10 @@ from ..db import get_db
 from ..email_address import remove_split_alias
 from ..email_client import MailCredential, OutlookImapClient
 from ..icloud_cache import find_latest_cached_code, get_cached_message, list_cached_messages
-from ..models import IcloudMailbox, Mailbox
+from ..models import IcloudMailbox, Mailbox, ThirdPartyIcloudMailbox
 from ..schemas import CodeOut, MessageDetailOut, MessageListOut, PublicMailboxOut
 from ..security import decrypt_value, verify_public_api_key
+from ..third_party_icloud_client import fetch_latest_code
 
 
 router = APIRouter(prefix="/public", tags=["public"], dependencies=[Depends(verify_public_api_key)])
@@ -80,6 +81,17 @@ def get_icloud_by_email_or_none(email: str, db: Session) -> IcloudMailbox | None
     if normalized_email != value:
         return db.scalar(select(IcloudMailbox).where(func.lower(IcloudMailbox.email) == normalized_email))
     return None
+
+
+def get_third_party_icloud_by_email_or_none(email: str, db: Session) -> ThirdPartyIcloudMailbox | None:
+    """把分裂邮箱归一到基础地址后查询第三方取码配置。"""
+
+    normalized_email = remove_split_alias(str(email))
+    return db.scalar(
+        select(ThirdPartyIcloudMailbox).where(
+            func.lower(ThirdPartyIcloudMailbox.email) == normalized_email
+        )
+    )
 
 
 def get_mailbox_by_email(email: EmailStr, db: Session) -> Mailbox:
@@ -167,14 +179,29 @@ def get_public_latest_code_by_email(
     mailbox = get_mailbox_by_email_or_none(str(email), db)
     if not mailbox:
         icloud_mailbox = get_icloud_by_email_or_none(str(email), db)
-        if not icloud_mailbox:
+        if icloud_mailbox:
+            message = find_latest_cached_code(db, icloud_mailbox.id, limit)
+            return CodeOut(
+                mailbox_token=icloud_mailbox.public_token,
+                email=icloud_mailbox.email,
+                code=message.get("code") if message else None,
+                message=message if message else None,
+            )
+        third_party_mailbox = get_third_party_icloud_by_email_or_none(str(email), db)
+        if not third_party_mailbox:
             raise HTTPException(status_code=404, detail="邮箱不存在")
-        message = find_latest_cached_code(db, icloud_mailbox.id, limit)
+        try:
+            fetch_url = decrypt_value(third_party_mailbox.fetch_url_enc)
+            if not fetch_url:
+                raise ValueError("第三方 iCloud 取码链接为空")
+            code = fetch_latest_code(third_party_mailbox.email, fetch_url)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"获取验证码失败：{exc}") from exc
         return CodeOut(
-            mailbox_token=icloud_mailbox.public_token,
-            email=icloud_mailbox.email,
-            code=message.get("code") if message else None,
-            message=message if message else None,
+            mailbox_token=third_party_mailbox.public_token,
+            email=third_party_mailbox.email,
+            code=code,
+            message=None,
         )
     try:
         message = OutlookImapClient(credential_from_mailbox(mailbox)).find_latest_code(limit=limit)

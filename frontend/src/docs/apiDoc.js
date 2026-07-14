@@ -29,7 +29,7 @@ GET /api/public/mailboxes/by-email/code?email=user%40icloud.com&limit=10
 X-API-Key: your_api_key
 \`\`\`
 
-支持 Microsoft 邮箱和已导入的 iCloud 转发邮箱。iCloud 邮箱会读取绑定的 IMAP 接收箱。
+支持 Microsoft 邮箱、iCloud 转发邮箱和第三方 iCloud 邮箱。第三方 iCloud 会实时访问已加密保存的取码链接。
 
 也支持自动识别分裂别名，例如 \`user+abcd@icloud.com\` 会回源查询 \`user@icloud.com\`。
 

@@ -53,10 +53,10 @@ def _migrate_sqlite() -> None:
     if not settings.database_url.startswith("sqlite"):
         return
     inspector = inspect(engine)
-    if "mailboxes" not in inspector.get_table_names():
-        return
-    columns = {column["name"] for column in inspector.get_columns("mailboxes")}
-    if "public_token" not in columns:
+    table_names = inspector.get_table_names()
+    if "mailboxes" in table_names and "public_token" not in {
+        column["name"] for column in inspector.get_columns("mailboxes")
+    }:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE mailboxes ADD COLUMN public_token VARCHAR(80)"))
             rows = connection.execute(text("SELECT id FROM mailboxes WHERE public_token IS NULL OR public_token = ''"))
@@ -67,4 +67,30 @@ def _migrate_sqlite() -> None:
                 )
             connection.execute(
                 text("CREATE UNIQUE INDEX IF NOT EXISTS ix_mailboxes_public_token ON mailboxes (public_token)")
+            )
+    if "third_party_icloud_mailboxes" in table_names and "public_token" not in {
+        column["name"] for column in inspector.get_columns("third_party_icloud_mailboxes")
+    }:
+        with engine.begin() as connection:
+            connection.execute(
+                text("ALTER TABLE third_party_icloud_mailboxes ADD COLUMN public_token VARCHAR(80)")
+            )
+            rows = connection.execute(
+                text(
+                    "SELECT id FROM third_party_icloud_mailboxes "
+                    "WHERE public_token IS NULL OR public_token = ''"
+                )
+            )
+            for row in rows:
+                connection.execute(
+                    text(
+                        "UPDATE third_party_icloud_mailboxes SET public_token = :token WHERE id = :id"
+                    ),
+                    {"token": f"tk_tp_{row.id:06d}", "id": row.id},
+                )
+            connection.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS ix_third_party_icloud_mailboxes_public_token "
+                    "ON third_party_icloud_mailboxes (public_token)"
+                )
             )

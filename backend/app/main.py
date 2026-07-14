@@ -8,7 +8,15 @@ from fastapi.staticfiles import StaticFiles
 from .config import get_settings
 from .db import init_db
 from .imap_sync_manager import imap_sync_manager
-from .routers import api_keys, auth, icloud_mailboxes, imap_configs, mailboxes, public
+from .routers import (
+    api_keys,
+    auth,
+    icloud_mailboxes,
+    imap_configs,
+    mailboxes,
+    public,
+    third_party_icloud_mailboxes,
+)
 
 
 settings = get_settings()
@@ -48,6 +56,7 @@ app.include_router(api_keys.router, prefix=settings.api_prefix)
 app.include_router(mailboxes.router, prefix=settings.api_prefix)
 app.include_router(imap_configs.router, prefix=settings.api_prefix)
 app.include_router(icloud_mailboxes.router, prefix=settings.api_prefix)
+app.include_router(third_party_icloud_mailboxes.router, prefix=settings.api_prefix)
 app.include_router(public.router, prefix=settings.api_prefix)
 app.include_router(public.token_router, prefix=settings.api_prefix)
 
