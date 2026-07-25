@@ -14,7 +14,7 @@ from .db import SessionLocal
 from .email_client import format_message, message_from_bytes
 from .icloud_cache import CACHE_FOLDER, ensure_sync_state
 from .imap_client import HEADER_FETCH_FIELDS, message_recipients, remove_split_alias
-from .models import IcloudCachedMessage, IcloudMailbox, ImapConfig, ImapSyncState
+from .models import IcloudCachedMessage, IcloudCachedRecipient, IcloudMailbox, ImapConfig, ImapSyncState
 
 
 INITIAL_BACKFILL_COUNT = 200
@@ -76,6 +76,16 @@ class CachedContent:
     html: str | None
     # 提取到的验证码。
     code: str | None
+
+
+@dataclass(frozen=True)
+class MailboxRecipientMatch:
+    """记录一封邮件在单个基础邮箱下命中的完整收件地址。"""
+
+    # 缓存邮件归属的基础邮箱。
+    mailbox_id: int
+    # 同一邮件可能同时投递给该邮箱的多个别名，必须全部保留。
+    recipient_emails: tuple[str, ...]
 
 
 def chunked(values: list[int], size: int) -> Iterable[list[int]]:
@@ -228,16 +238,22 @@ class ImapCacheSynchronizer:
             db.commit()
         return self._load_snapshot(config_id)
 
-    def _match_mailboxes(self, headers: dict[int, Message], snapshot: SyncSnapshot) -> dict[int, tuple[int, ...]]:
-        """把邮件头中的收件人归一到当前配置绑定的 iCloud 邮箱。"""
+    def _match_mailboxes(
+        self, headers: dict[int, Message], snapshot: SyncSnapshot
+    ) -> dict[int, tuple[MailboxRecipientMatch, ...]]:
+        """按基础邮箱定位缓存归属，同时保留用于取码隔离的完整地址。"""
 
-        matches: dict[int, tuple[int, ...]] = {}
+        matches: dict[int, tuple[MailboxRecipientMatch, ...]] = {}
         for uid, message in headers.items():
-            mailbox_ids: set[int] = set()
+            recipients_by_mailbox: dict[int, set[str]] = {}
             for recipient in message_recipients(message):
-                mailbox_ids.update(snapshot.mailbox_ids_by_email.get(remove_split_alias(recipient), ()))
-            if mailbox_ids:
-                matches[uid] = tuple(sorted(mailbox_ids))
+                for mailbox_id in snapshot.mailbox_ids_by_email.get(remove_split_alias(recipient), ()):
+                    recipients_by_mailbox.setdefault(mailbox_id, set()).add(recipient)
+            if recipients_by_mailbox:
+                matches[uid] = tuple(
+                    MailboxRecipientMatch(mailbox_id, tuple(sorted(recipients)))
+                    for mailbox_id, recipients in sorted(recipients_by_mailbox.items())
+                )
         return matches
 
     def _store_results(
@@ -245,7 +261,7 @@ class ImapCacheSynchronizer:
         snapshot: SyncSnapshot,
         uid_validity: int,
         cursor_uid: int,
-        mailbox_ids_by_uid: dict[int, tuple[int, ...]],
+        mailbox_matches_by_uid: dict[int, tuple[MailboxRecipientMatch, ...]],
         bodies: dict[int, Message],
     ) -> None:
         """在单个事务中写入邮件并推进游标，失败时整批回滚。"""
@@ -265,7 +281,7 @@ class ImapCacheSynchronizer:
             )
             if not state or state.uid_validity != uid_validity:
                 raise RuntimeError("IMAP 同步状态在提交前发生变化")
-            candidate_uids = list(mailbox_ids_by_uid)
+            candidate_uids = list(mailbox_matches_by_uid)
             existing: set[tuple[int, int]] = set()
             if candidate_uids:
                 existing = set(
@@ -277,29 +293,36 @@ class ImapCacheSynchronizer:
                         )
                     ).all()
                 )
-            for uid, mailbox_ids in mailbox_ids_by_uid.items():
+            for uid, mailbox_matches in mailbox_matches_by_uid.items():
                 message = bodies.get(uid)
                 if not message:
                     continue
                 content = parse_cached_content(uid, message)
-                for mailbox_id in mailbox_ids:
-                    if (mailbox_id, uid) in existing:
+                for match in mailbox_matches:
+                    if (match.mailbox_id, uid) in existing:
                         continue
-                    db.add(
-                        IcloudCachedMessage(
-                            icloud_mailbox_id=mailbox_id,
-                            imap_config_id=snapshot.config_id,
-                            folder=CACHE_FOLDER,
-                            uid=uid,
-                            subject=content.subject,
-                            sender=content.sender,
-                            message_date=content.message_date,
-                            snippet=content.snippet,
-                            body=content.body,
-                            html=content.html,
-                            code=content.code,
-                            cached_at=now,
+                    cached_message = IcloudCachedMessage(
+                        icloud_mailbox_id=match.mailbox_id,
+                        imap_config_id=snapshot.config_id,
+                        folder=CACHE_FOLDER,
+                        uid=uid,
+                        subject=content.subject,
+                        sender=content.sender,
+                        message_date=content.message_date,
+                        snippet=content.snippet,
+                        body=content.body,
+                        html=content.html,
+                        code=content.code,
+                        cached_at=now,
+                    )
+                    db.add(cached_message)
+                    db.flush()
+                    db.add_all(
+                        IcloudCachedRecipient(
+                            cached_message_id=cached_message.id,
+                            recipient_email=recipient_email,
                         )
+                        for recipient_email in match.recipient_emails
                     )
             state.last_uid = max(state.last_uid, cursor_uid)
             state.last_synced_at = now
@@ -347,12 +370,12 @@ class ImapCacheSynchronizer:
         )
         if snapshot.mailbox_ids_by_email and set(headers) != set(target_uids):
             raise RuntimeError("批量获取 IMAP 邮件头不完整")
-        mailbox_ids_by_uid = self._match_mailboxes(headers, snapshot)
-        body_uids = sorted(mailbox_ids_by_uid)
+        mailbox_matches_by_uid = self._match_mailboxes(headers, snapshot)
+        body_uids = sorted(mailbox_matches_by_uid)
         bodies = fetch_messages(imap, body_uids, SYNC_BODY_FETCH_FIELDS, BODY_BATCH_SIZE)
         if set(bodies) != set(body_uids):
             raise RuntimeError("批量获取 IMAP 邮件正文不完整")
-        self._store_results(snapshot, uid_validity, cursor_uid, mailbox_ids_by_uid, bodies)
+        self._store_results(snapshot, uid_validity, cursor_uid, mailbox_matches_by_uid, bodies)
 
 
 def mark_sync_error(config_id: int, error: str, session_factory: Callable[[], Session] = SessionLocal) -> None:

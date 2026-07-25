@@ -11,7 +11,13 @@ from sqlalchemy.orm import Session, sessionmaker
 from backend.app.db import Base
 from backend.app.icloud_cache import request_config_backfill
 from backend.app.imap_sync import ImapCacheSynchronizer
-from backend.app.models import IcloudCachedMessage, IcloudMailbox, ImapConfig, ImapSyncState
+from backend.app.models import (
+    IcloudCachedMessage,
+    IcloudCachedRecipient,
+    IcloudMailbox,
+    ImapConfig,
+    ImapSyncState,
+)
 
 
 def build_message(recipient: str, code: str, subject: str = "验证码") -> bytes:
@@ -82,6 +88,9 @@ class ImapSyncTestCase(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         database_path = Path(self.temp_dir.name) / "test.db"
         self.engine = create_engine(f"sqlite:///{database_path}")
+        with self.engine.begin() as connection:
+            # 与生产连接一致启用外键，验证缓存删除会级联清理别名映射。
+            connection.exec_driver_sql("PRAGMA foreign_keys=ON")
         Base.metadata.create_all(self.engine)
         self.session_factory = sessionmaker(bind=self.engine, expire_on_commit=False)
         with self.session_factory() as db:
@@ -150,9 +159,13 @@ class ImapSyncTestCase(unittest.TestCase):
                 .where(IcloudCachedMessage.icloud_mailbox_id == mailbox_id)
                 .order_by(IcloudCachedMessage.uid)
             ).all()
+            recipients = db.scalars(
+                select(IcloudCachedRecipient.recipient_email).order_by(IcloudCachedRecipient.recipient_email)
+            ).all()
             self.assertEqual(state.last_uid, 3)
             self.assertEqual(state.uid_validity, 1)
             self.assertEqual(codes, ["222222", "333333"])
+            self.assertEqual(recipients, ["user+shop@icloud.com", "user@icloud.com"])
 
     def test_incremental_sync_filters_boundary_and_is_idempotent(self) -> None:
         """增量搜索必须过滤边界 UID，重复轮询不能重复写入。"""

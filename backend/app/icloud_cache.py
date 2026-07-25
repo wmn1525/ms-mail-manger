@@ -3,12 +3,12 @@
 import binascii
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from .imap_client import parse_scoped_uid, scoped_uid
-from .models import IcloudCachedMessage, ImapSyncState
+from .models import IcloudCachedMessage, IcloudCachedRecipient, ImapSyncState
 
 
 CACHE_FOLDER = "INBOX"
@@ -64,15 +64,21 @@ def get_cached_message(db: Session, mailbox_id: int, uid: str) -> dict | None:
     return cached_message_dict(message, include_body=True) if message else None
 
 
-def find_latest_cached_code(db: Session, mailbox_id: int, limit: int) -> dict | None:
-    """只在最新 limit 封缓存邮件中查找第一个验证码。"""
+def find_latest_cached_code(
+    db: Session,
+    mailbox_id: int,
+    limit: int,
+    recipient_email: str | None = None,
+) -> dict | None:
+    """在邮箱或指定完整别名的最新缓存邮件中查找验证码。"""
 
-    messages = db.scalars(
-        select(IcloudCachedMessage)
-        .where(IcloudCachedMessage.icloud_mailbox_id == mailbox_id)
-        .order_by(IcloudCachedMessage.uid.desc())
-        .limit(limit)
-    ).all()
+    statement = select(IcloudCachedMessage).where(IcloudCachedMessage.icloud_mailbox_id == mailbox_id)
+    if recipient_email:
+        statement = statement.join(IcloudCachedRecipient).where(
+            func.lower(IcloudCachedRecipient.recipient_email) == recipient_email.strip().lower()
+        )
+    statement = statement.order_by(IcloudCachedMessage.uid.desc()).limit(limit)
+    messages = db.scalars(statement).all()
     message = next((item for item in messages if item.code), None)
     return cached_message_dict(message, include_body=False) if message else None
 

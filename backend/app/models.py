@@ -151,6 +151,24 @@ class IcloudCachedMessage(Base):
     cached_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
 
+class IcloudCachedRecipient(Base):
+    """保存缓存邮件匹配到的完整收件地址，用于隔离不同加号别名。"""
+
+    __tablename__ = "icloud_cached_recipients"
+    __table_args__ = (
+        UniqueConstraint("cached_message_id", "recipient_email", name="uq_icloud_cached_recipient_email"),
+    )
+
+    # 本地映射主键，不对外暴露。
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    # 缓存邮件删除时一并删除收件人映射，避免残留无效隔离数据。
+    cached_message_id: Mapped[int] = mapped_column(
+        ForeignKey("icloud_cached_messages.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # 保留标准化后的完整地址，不移除 +alias。
+    recipient_email: Mapped[str] = mapped_column(String(320), nullable=False, index=True)
+
+
 class ApiKey(Base):
     __tablename__ = "api_keys"
 

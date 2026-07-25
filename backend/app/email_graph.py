@@ -22,16 +22,21 @@ class GraphMailClient:
         self.list_messages(limit=1)
 
     def list_messages(self, limit: int = 30) -> list[dict]:
+        return [format_graph_message(message, include_body=False) for message in self._list_message_payloads(limit)]
+
+    def _list_message_payloads(self, limit: int) -> list[dict]:
+        """读取带完整收件人的原始 Graph 邮件，供别名隔离判断复用。"""
+
         params = {
             "$top": str(limit),
-            "$select": "id,subject,from,receivedDateTime,bodyPreview",
+            "$select": "id,subject,from,receivedDateTime,bodyPreview,toRecipients,ccRecipients,bccRecipients",
             "$orderby": "receivedDateTime desc",
         }
         payload = self._request("/me/mailFolders/inbox/messages", params)
         messages = payload.get("value")
         if not isinstance(messages, list):
             return []
-        return [format_graph_message(message, include_body=False) for message in messages if isinstance(message, dict)]
+        return [message for message in messages if isinstance(message, dict)]
 
     def get_message(self, uid: str) -> dict:
         message_id = decode_graph_uid(uid)
@@ -41,13 +46,24 @@ class GraphMailClient:
         payload = self._request(f"/me/messages/{urllib.parse.quote(message_id, safe='')}", params)
         return format_graph_message(payload, include_body=True)
 
-    def find_latest_code(self, limit: int = 10) -> dict | None:
-        for message in self.list_messages(limit=limit):
+    def find_latest_code(self, limit: int = 10, recipient_email: str | None = None) -> dict | None:
+        """精确匹配 Graph 邮件收件地址，隔离同一账户的不同别名。"""
+
+        target_email = recipient_email.strip().lower() if recipient_email else None
+        scan_limit = max(limit, 200) if target_email else limit
+        matched_count = 0
+        for payload in self._list_message_payloads(scan_limit):
+            if target_email and target_email not in get_graph_recipients(payload):
+                continue
+            matched_count += 1
+            message = format_graph_message(payload, include_body=False)
             if message.get("code"):
                 return message
             detail = self.get_message(str(message["uid"]))
             if detail.get("code"):
                 return detail
+            if matched_count >= limit:
+                break
         return None
 
     def _request(self, path: str, params: dict[str, str]) -> dict:
@@ -117,6 +133,25 @@ def get_sender(message: dict) -> str:
     if name and email:
         return f"{name} <{email}>"
     return email or name
+
+
+def get_graph_recipients(message: dict) -> set[str]:
+    """提取 Graph 邮件的标准化收件地址，保留完整 +alias。"""
+
+    recipients: set[str] = set()
+    for key in ("toRecipients", "ccRecipients", "bccRecipients"):
+        values = message.get(key)
+        if not isinstance(values, list):
+            continue
+        for value in values:
+            if not isinstance(value, dict):
+                continue
+            address = value.get("emailAddress")
+            if isinstance(address, dict):
+                email = get_text(address, "address").strip().lower()
+                if email:
+                    recipients.add(email)
+    return recipients
 
 
 def get_graph_body(message: dict) -> str:

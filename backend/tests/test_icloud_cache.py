@@ -16,7 +16,8 @@ from backend.app.icloud_cache import (
     list_cached_messages,
 )
 from backend.app.imap_client import scoped_uid
-from backend.app.models import IcloudCachedMessage, IcloudMailbox, ImapConfig
+from backend.app.models import IcloudCachedMessage, IcloudCachedRecipient, IcloudMailbox, ImapConfig
+from backend.app.routers.public import get_public_latest_code_by_email
 from backend.app.schemas import CodeOut, MessageDetailOut, MessageListOut
 
 
@@ -108,6 +109,39 @@ class IcloudCacheTestCase(unittest.TestCase):
             message=expanded,
         )
         self.assertEqual(response.message.uid, scoped_uid("INBOX", 1))
+
+    def test_code_lookup_isolates_full_alias_recipient(self) -> None:
+        """同一基础邮箱的不同加号别名只能读取各自收到的验证码。"""
+
+        with self.session_factory() as db:
+            for uid, alias, code in (
+                (4, "user+shop@icloud.com", "444444"),
+                (5, "user+work@icloud.com", "555555"),
+            ):
+                message = IcloudCachedMessage(
+                    icloud_mailbox_id=self.mailbox_id,
+                    imap_config_id=self.config_id,
+                    folder="INBOX",
+                    uid=uid,
+                    subject=f"别名邮件 {uid}",
+                    sender="sender@example.com",
+                    snippet=code,
+                    body=code,
+                    code=code,
+                    cached_at=datetime.now(UTC),
+                )
+                db.add(message)
+                db.flush()
+                db.add(IcloudCachedRecipient(cached_message_id=message.id, recipient_email=alias))
+            db.commit()
+            shop = find_latest_cached_code(db, self.mailbox_id, 10, "user+shop@icloud.com")
+            work = find_latest_cached_code(db, self.mailbox_id, 10, "user+work@icloud.com")
+            response = get_public_latest_code_by_email("user+shop@icloud.com", 10, db)
+
+        self.assertEqual(shop["code"], "444444")
+        self.assertEqual(work["code"], "555555")
+        self.assertEqual(str(response.email), "user+shop@icloud.com")
+        self.assertEqual(response.code, "444444")
 
     def test_cleanup_removes_only_expired_messages(self) -> None:
         """七天清理按缓存写入时间执行，不受邮件 Date 头影响。"""

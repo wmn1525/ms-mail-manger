@@ -54,6 +54,24 @@ def _migrate_sqlite() -> None:
         return
     inspector = inspect(engine)
     table_names = inspector.get_table_names()
+    if {"icloud_cached_messages", "icloud_cached_recipients", "imap_sync_states"}.issubset(table_names):
+        with engine.begin() as connection:
+            missing_recipient = connection.scalar(
+                text(
+                    "SELECT 1 FROM icloud_cached_messages AS message "
+                    "WHERE NOT EXISTS (SELECT 1 FROM icloud_cached_recipients AS recipient "
+                    "WHERE recipient.cached_message_id = message.id) LIMIT 1"
+                )
+            )
+            if missing_recipient:
+                # 旧缓存没有完整收件地址，必须丢弃并回填，不能猜测其所属别名。
+                connection.execute(text("DELETE FROM icloud_cached_messages"))
+                connection.execute(
+                    text(
+                        "UPDATE imap_sync_states SET uid_validity = NULL, last_uid = 0, "
+                        "last_backfilled_at = NULL, backfill_requested_at = CURRENT_TIMESTAMP"
+                    )
+                )
     if "mailboxes" in table_names and "public_token" not in {
         column["name"] for column in inspector.get_columns("mailboxes")
     }:

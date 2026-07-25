@@ -254,10 +254,18 @@ class OutlookImapClient:
         finally:
             imap.logout()
 
-    def find_latest_code(self, limit: int = 10) -> dict | None:
-        return self._run_auto(lambda client: client.find_latest_code(limit), lambda: self._find_latest_code_imap(limit))
+    def find_latest_code(self, limit: int = 10, recipient_email: str | None = None) -> dict | None:
+        """读取邮箱或指定完整别名的最新验证码。"""
 
-    def _find_latest_code_imap(self, limit: int = 10) -> dict | None:
+        return self._run_auto(
+            lambda client: client.find_latest_code(limit, recipient_email),
+            lambda: self._find_latest_code_imap(limit, recipient_email),
+        )
+
+    def _find_latest_code_imap(self, limit: int = 10, recipient_email: str | None = None) -> dict | None:
+        """通过 IMAP 精确匹配完整收件地址，避免不同别名串码。"""
+
+        target_email = recipient_email.strip().lower() if recipient_email else None
         imap = self._open()
         try:
             status, _ = imap.select(self.settings.imap_folder, readonly=True)
@@ -268,8 +276,10 @@ class OutlookImapClient:
             if status != "OK" or not data or not data[0]:
                 return None
 
-            uids = data[0].split()[-limit:]
+            scan_limit = max(limit, 200) if target_email else limit
+            uids = data[0].split()[-scan_limit:]
             uids.reverse()
+            matched_count = 0
             for uid in uids:
                 status, fetched = imap.uid("fetch", uid, "(RFC822)")
                 if status != "OK" or not fetched:
@@ -277,9 +287,19 @@ class OutlookImapClient:
                 raw = next((item[1] for item in fetched if isinstance(item, tuple) and item[1]), None)
                 if not raw:
                     continue
-                message = format_message(uid, message_from_bytes(raw), include_body=True)
+                parsed_message = message_from_bytes(raw)
+                if target_email:
+                    # 延迟导入避免 email_client 与通用 IMAP 客户端形成模块循环依赖。
+                    from .imap_client import message_recipients
+
+                    if target_email not in message_recipients(parsed_message):
+                        continue
+                matched_count += 1
+                message = format_message(uid, parsed_message, include_body=True)
                 if message.get("code"):
                     return message
+                if matched_count >= limit:
+                    break
             return None
         finally:
             imap.logout()

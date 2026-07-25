@@ -176,25 +176,25 @@ def get_public_latest_code_by_email(
 ) -> CodeOut:
     """按邮箱从最新 limit 封邮件中返回验证码。"""
 
-    mailbox = get_mailbox_by_email_or_none(str(email), db)
+    requested_email = str(email).strip().lower()
+    mailbox = get_mailbox_by_email_or_none(requested_email, db)
     if not mailbox:
-        icloud_mailbox = get_icloud_by_email_or_none(str(email), db)
+        icloud_mailbox = get_icloud_by_email_or_none(requested_email, db)
         if icloud_mailbox:
-            message = find_latest_cached_code(db, icloud_mailbox.id, limit)
+            message = find_latest_cached_code(db, icloud_mailbox.id, limit, requested_email)
             return CodeOut(
                 mailbox_token=icloud_mailbox.public_token,
-                email=icloud_mailbox.email,
+                email=requested_email,
                 code=message.get("code") if message else None,
                 message=message if message else None,
             )
-        third_party_mailbox = get_third_party_icloud_by_email_or_none(str(email), db)
+        third_party_mailbox = get_third_party_icloud_by_email_or_none(requested_email, db)
         if not third_party_mailbox:
             raise HTTPException(status_code=404, detail="邮箱不存在")
         try:
             fetch_url = decrypt_value(third_party_mailbox.fetch_url_enc)
             if not fetch_url:
                 raise ValueError("第三方 iCloud 取码链接为空")
-            requested_email = str(email).strip().lower()
             target_url = build_fetch_url(third_party_mailbox.email, fetch_url, requested_email)
             code = fetch_latest_code(requested_email, target_url)
         except Exception as exc:
@@ -206,12 +206,15 @@ def get_public_latest_code_by_email(
             message=None,
         )
     try:
-        message = OutlookImapClient(credential_from_mailbox(mailbox)).find_latest_code(limit=limit)
+        message = OutlookImapClient(credential_from_mailbox(mailbox)).find_latest_code(
+            limit=limit,
+            recipient_email=requested_email,
+        )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"获取验证码失败：{exc}") from exc
     return CodeOut(
         mailbox_token=mailbox.public_token,
-        email=mailbox.email,
+        email=requested_email,
         code=message.get("code") if message else None,
         message=message if message else None,
     )

@@ -142,7 +142,7 @@ user@outlook.com----邮箱密码----可留空----可留空
 GET /api/public/mailboxes/by-email/code?email=user%40icloud.com&limit=10
 ```
 
-分裂邮箱也会自动回源，例如 `user+abcd@icloud.com` 会匹配 `user@icloud.com`。
+分裂邮箱也会自动回源，例如 `user+abcd@icloud.com` 会匹配 `user@icloud.com`；取码时按完整收件地址隔离，不同别名不会互相返回验证码。
 第三方 iCloud 邮箱同样使用该 API Key 接口取码；分裂邮箱会先定位基础配置，再把完整别名地址传给第三方取码链接。
 
 系统会在后台每 2 秒检查一次绑定 IMAP 收件箱的新 UID。首次启动回填最近 200 封邮件，之后只批量读取新邮件；
