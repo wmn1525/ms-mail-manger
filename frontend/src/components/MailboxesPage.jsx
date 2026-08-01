@@ -123,8 +123,8 @@ export function MailboxesPage() {
 
   function handleSplitExport() {
     const count = Number.parseInt(splitCount, 10);
-    if (!Number.isInteger(count) || count < 1 || count > 10000) {
-      Toast.warning("分裂次数请输入 1-10000 之间的整数");
+    if (!Number.isInteger(count) || count < 0 || count > 10000) {
+      Toast.warning("分裂次数请输入 0-10000 之间的整数");
       return;
     }
     const selectedKeys = new Set(selectedRowKeys.map(String));
@@ -371,7 +371,7 @@ function SplitModal({ visible, count, selectedCount, onCount, onClose, onExport 
     <Modal title="分裂导出 CSV" visible={visible} onCancel={onClose} onOk={onExport} okText="导出">
       <div className="split-export-panel">
         <Text type="secondary">已选择 {selectedCount} 个邮箱，每个邮箱会导出本体和指定次数的 +4 位随机字母别名。</Text>
-        <div className="split-export-field"><Text strong>分裂次数</Text><Input type="number" min={1} max={10000} value={count} onChange={onCount} /></div>
+        <div className="split-export-field"><Text strong>分裂次数</Text><Input type="number" min={0} max={10000} value={count} onChange={onCount} /></div>
       </div>
     </Modal>
   );

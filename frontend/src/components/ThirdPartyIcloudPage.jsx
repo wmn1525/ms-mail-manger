@@ -74,8 +74,8 @@ export function ThirdPartyIcloudPage() {
   // 复用邮箱分裂工具，默认次数为 5 且允许用户在弹窗中调整。
   function handleSplitExport() {
     const count = Number.parseInt(splitCount, 10);
-    if (!Number.isInteger(count) || count < 1 || count > 10000) {
-      Toast.warning("分裂次数请输入 1-10000 之间的整数");
+    if (!Number.isInteger(count) || count < 0 || count > 10000) {
+      Toast.warning("分裂次数请输入 0-10000 之间的整数");
       return;
     }
     const selectedKeys = new Set(selectedRowKeys.map(String));
@@ -210,7 +210,7 @@ export function ThirdPartyIcloudPage() {
           <Text type="secondary">已选择 {selectedRowKeys.length} 个邮箱，每个邮箱会导出本体和指定次数的 +4 位随机字母别名。</Text>
           <div className="split-export-field">
             <Text strong>分裂次数</Text>
-            <Input type="number" min={1} max={10000} value={splitCount} onChange={setSplitCount} />
+            <Input type="number" min={0} max={10000} value={splitCount} onChange={setSplitCount} />
           </div>
         </div>
       </Modal>
