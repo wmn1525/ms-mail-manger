@@ -1,5 +1,8 @@
+"""Microsoft 邮箱读取与验证码提取，统一处理 Graph 和 IMAP 凭据。"""
+
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from email import message_from_bytes
 from email.header import decode_header, make_header
@@ -9,9 +12,16 @@ import html
 import imaplib
 import re
 import ssl
+from typing import TYPE_CHECKING, TypeVar
 
 from .config import get_settings
 from .mail_oauth import GRAPH_MODES, IMAP_MODE, refresh_access_token_for_scope
+
+if TYPE_CHECKING:
+    from .email_graph import GraphMailClient
+
+# 业务请求结果原样返回，模式选择不改变响应结构。
+GraphResult = TypeVar("GraphResult")
 
 
 CODE_RE = re.compile(r"(?<!\d)(\d{4,8})(?!\d)")
@@ -132,8 +142,9 @@ class OutlookImapClient:
     def _has_refresh_token(self) -> bool:
         return bool(self.credential.client_id and self.credential.token and not self.credential.token.startswith("eyJ"))
 
-    def _graph_client(self):
-        # Graph 模式需要先用最小读信请求确认 token 不只是能换取，还能真正读邮箱。
+    def _run_graph(self, graph_call: Callable[[GraphMailClient], GraphResult]) -> GraphResult:
+        """用实际读取请求验证 Graph 权限，省去每次取码前的额外探活。"""
+
         from .email_graph import GraphMailClient
 
         errors: list[str] = []
@@ -143,8 +154,7 @@ class OutlookImapClient:
             try:
                 token = refresh_access_token_for_scope(self.credential.client_id, self.credential.token, mode.scope)
                 client = GraphMailClient(token)
-                client.check_alive()
-                return client
+                return graph_call(client)
             except Exception as exc:
                 errors.append(f"{mode.name}: {exc}")
         raise RuntimeError("Graph 模式不可用：" + "；".join(errors))
@@ -154,7 +164,7 @@ class OutlookImapClient:
         if not self._has_refresh_token():
             return imap_call()
         try:
-            return graph_call(self._graph_client())
+            return self._run_graph(graph_call)
         except Exception as graph_exc:
             try:
                 return imap_call()
@@ -233,7 +243,7 @@ class OutlookImapClient:
 
     def get_message(self, uid: str) -> dict:
         if self._has_refresh_token() and uid.startswith("graph:"):
-            return self._graph_client().get_message(uid)
+            return self._run_graph(lambda client: client.get_message(uid))
         return self._run_auto(lambda client: client.get_message(uid), lambda: self._get_message_imap(uid))
 
     def _get_message_imap(self, uid: str) -> dict:
@@ -265,6 +275,9 @@ class OutlookImapClient:
     def _find_latest_code_imap(self, limit: int = 10, recipient_email: str | None = None) -> dict | None:
         """通过 IMAP 精确匹配完整收件地址，避免不同别名串码。"""
 
+        # 延迟导入，避免通用 IMAP 的邮件格式化依赖形成循环。
+        from .email_code_imap import code_messages
+
         target_email = recipient_email.strip().lower() if recipient_email else None
         imap = self._open()
         try:
@@ -280,20 +293,7 @@ class OutlookImapClient:
             uids = data[0].split()[-scan_limit:]
             uids.reverse()
             matched_count = 0
-            for uid in uids:
-                status, fetched = imap.uid("fetch", uid, "(RFC822)")
-                if status != "OK" or not fetched:
-                    continue
-                raw = next((item[1] for item in fetched if isinstance(item, tuple) and item[1]), None)
-                if not raw:
-                    continue
-                parsed_message = message_from_bytes(raw)
-                if target_email:
-                    # 延迟导入避免 email_client 与通用 IMAP 客户端形成模块循环依赖。
-                    from .imap_client import message_recipients
-
-                    if target_email not in message_recipients(parsed_message):
-                        continue
+            for uid, parsed_message in code_messages(imap, uids, target_email):
                 matched_count += 1
                 message = format_message(uid, parsed_message, include_body=True)
                 if message.get("code"):

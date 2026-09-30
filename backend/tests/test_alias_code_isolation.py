@@ -32,6 +32,10 @@ class FakeOutlookImap:
         """保存 UID 到邮件正文的映射。"""
 
         self.messages = messages
+        # 记录请求种类和 UID，断言批量读取没有下载无关正文。
+        self.fetches: list[tuple[list[int], str]] = []
+        # 无论成功还是异常，都应释放此次连接。
+        self.closed = False
 
     def select(self, folder: str, readonly: bool) -> tuple[str, list[bytes]]:
         """模拟成功打开收件箱。"""
@@ -45,18 +49,27 @@ class FakeOutlookImap:
         uid: bytes | None,
         fields: str,
     ) -> tuple[str, list[bytes | tuple[bytes, bytes]]]:
-        """模拟 UID 搜索和完整邮件读取。"""
+        """模拟批量 FETCH，刻意按升序返回以验证客户端使用真实 UID。"""
 
-        del fields
         if command == "search":
-            return "OK", [b"1 2"]
+            return "OK", [b" ".join(str(value).encode("ascii") for value in sorted(self.messages))]
         if uid is None:
             raise AssertionError("FETCH 必须指定 UID")
-        raw = self.messages[int(uid)]
-        return "OK", [(b"metadata", raw)]
+        values = [int(value) for value in uid.split(b",")]
+        self.fetches.append((values, fields))
+        fetched: list[bytes | tuple[bytes, bytes]] = []
+        for value in sorted(values):
+            raw = self.messages[value]
+            if "HEADER.FIELDS" in fields:
+                raw = raw.split(b"\n\n", 1)[0] + b"\n\n"
+            metadata = f"1 (UID {value} BODY[] {{{len(raw)}}}".encode("ascii")
+            fetched.extend([(metadata, raw), b")"])
+        return "OK", fetched
 
     def logout(self) -> None:
         """测试连接无需释放真实网络资源。"""
+
+        self.closed = True
 
 
 class FakeGraphClient(GraphMailClient):
